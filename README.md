@@ -3,6 +3,8 @@
   <h1>fast-mempalace</h1>
   <p><b>Local-first long-term memory for AI coding agents.</b><br/>
   Your agent remembers your codebase and decisions across sessions — in a single static binary. No cloud, no Python, nothing leaves your machine.</p>
+  <br/>
+  <img src="assets/demo.gif" alt="fast-mempalace semantic recall demo" width="760"/>
 </div>
 
 ---
