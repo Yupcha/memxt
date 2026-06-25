@@ -1,34 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="100%" height="100%">
   <!-- Background -->
   <rect width="400" height="400" fill="#0D0D15" rx="30" />
-  
-  <!-- Glowing Aura -->
-  <circle cx="200" cy="180" r="140" fill="none" stroke="#38BDF8" stroke-width="2" stroke-dasharray="8 8" opacity="0.3" />
-  <circle cx="200" cy="180" r="90" fill="#38BDF8" opacity="0.08" />
 
-  <!-- The Palace (Neon Cyan Structure) -->
-  <g fill="none" stroke="#22D3EE" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
-    <!-- Platform & Steps -->
-    <path d="M110 270 L290 270" />
-    <path d="M90 290 L310 290" />
-    
-    <!-- Classical Pillars -->
-    <path d="M130 150 L130 270" />
-    <path d="M176 150 L176 270" />
-    <path d="M224 150 L224 270" />
-    <path d="M270 150 L270 270" />
-
-    <!-- Roof / Acropolis Pediment -->
-    <path d="M80 150 L320 150 L200 80 Z" stroke-width="8" />
-  </g>
-
-  <!-- The Thunderbolt Slicing Through (Neon Yellow/Gold) -->
-  <path d="M240 50 L150 180 L220 180 L180 320 L280 150 L210 150 Z" fill="#FBBF24" stroke="#FEF08A" stroke-width="3" filter="url(#glow)" />
+  <!-- Glowing aura -->
+  <circle cx="200" cy="175" r="140" fill="none" stroke="#38BDF8" stroke-width="2" stroke-dasharray="8 8" opacity="0.25" />
+  <circle cx="200" cy="175" r="95" fill="#38BDF8" opacity="0.07" />
 
   <defs>
-    <!-- Lightning Glow Effect -->
-    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
-      <feGaussianBlur stdDeviation="12" result="blur" />
+    <!-- Bolt glow -->
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="11" result="blur" />
       <feMerge>
         <feMergeNode in="blur" />
         <feMergeNode in="SourceGraphic" />
@@ -36,6 +17,24 @@
     </filter>
   </defs>
 
-  <!-- Branding Headline -->
-  <text x="200" y="355" fill="#F8FAFC" font-family="-apple-system, system-ui, sans-serif" font-size="28" font-weight="900" text-anchor="middle" letter-spacing="3">FAST-MEMPALACE</text>
+  <!-- Memory layers (Wings → Rooms → Drawers): stacked local-storage cells -->
+  <g fill="none" stroke="#22D3EE" stroke-width="7" stroke-linejoin="round">
+    <rect x="118" y="100" width="164" height="44" rx="12" opacity="0.55" />
+    <rect x="118" y="155" width="164" height="44" rx="12" opacity="0.8" />
+    <rect x="118" y="210" width="164" height="44" rx="12" />
+  </g>
+  <!-- node dots: the embedded "memories" -->
+  <g fill="#22D3EE">
+    <circle cx="140" cy="122" r="5" opacity="0.55" />
+    <circle cx="140" cy="177" r="5" opacity="0.8" />
+    <circle cx="140" cy="232" r="5" />
+  </g>
+
+  <!-- Speed bolt slicing through the stack (fast, on-device) -->
+  <path d="M236 70 L150 188 L208 188 L172 300 L268 168 L210 168 Z"
+        fill="#FBBF24" stroke="#FEF08A" stroke-width="3" filter="url(#glow)" />
+
+  <!-- Wordmark -->
+  <text x="200" y="350" fill="#F8FAFC" font-family="-apple-system, system-ui, 'Segoe UI', sans-serif"
+        font-size="58" font-weight="900" text-anchor="middle" letter-spacing="1">memxt</text>
 </svg>

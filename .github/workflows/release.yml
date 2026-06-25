@@ -18,8 +18,14 @@ jobs:
         include:
           - target: darwin-aarch64
             runner: macos-latest
+          # Intel macOS: cross-compile on the plentiful arm runner (macos-13
+          # Intel runners are deprecated and queue-starved). The binary can't be
+          # run on the arm host, so its runtime smoke test is skipped.
           - target: darwin-x86_64
-            runner: macos-13
+            runner: macos-latest
+            osx_arch: x86_64
+            zig_target: x86_64-macos
+            skip_run: "true"
           - target: linux-x86_64
             runner: ubuntu-latest
           - target: linux-aarch64
@@ -84,10 +90,14 @@ jobs:
       - name: Build llama.cpp static libraries
         if: steps.cache_llama.outputs.cache-hit != 'true'
         run: |
+          # Cross-compile flag for Intel macOS built on an arm runner.
+          OSX_ARCH_FLAG=""
+          if [ -n "${{ matrix.osx_arch }}" ]; then OSX_ARCH_FLAG="-DCMAKE_OSX_ARCHITECTURES=${{ matrix.osx_arch }}"; fi
           if [ "$(uname -s)" = "Darwin" ]; then
             cmake -S lib/llama.cpp -B lib/llama.cpp/build \
               -DCMAKE_BUILD_TYPE=Release \
               -DBUILD_SHARED_LIBS=OFF \
+              $OSX_ARCH_FLAG \
               -DGGML_METAL=ON \
               -DGGML_BLAS=ON \
               -DLLAMA_BUILD_TESTS=OFF \
@@ -110,9 +120,16 @@ jobs:
           cmake --build lib/llama.cpp/build -j
 
       - name: Build release
-        run: zig build --release=fast
+        run: |
+          if [ -n "${{ matrix.zig_target }}" ]; then
+            zig build --release=fast -Dtarget=${{ matrix.zig_target }}
+          else
+            zig build --release=fast
+          fi
 
       - name: Smoke test (incl. real embeddings)
+        # Skip for a cross-compiled binary that can't run on this host.
+        if: ${{ matrix.skip_run != 'true' }}
         run: |
           set -eux
           ./zig-out/bin/memxt init
