@@ -20,13 +20,13 @@ leaves your machine.
 1. Install the engine (single static binary + 45 MB embedding model, fully local):
 
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/MemPalace/fast-mempalace/main/install.sh | bash
+   curl -fsSL https://raw.githubusercontent.com/debpalash/fast-mempalace/main/install.sh | bash
    ```
 
 2. Add the plugin in Claude Code:
 
    ```
-   /plugin marketplace add MemPalace/fast-mempalace
+   /plugin marketplace add debpalash/fast-mempalace
    /plugin install fast-mempalace
    ```
 

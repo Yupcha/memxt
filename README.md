@@ -22,7 +22,7 @@ write to — wired into Claude Code via MCP tools and session hooks.
 ## ⚡ Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/MemPalace/fast-mempalace/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/debpalash/fast-mempalace/main/install.sh | bash
 ```
 
 Detects `darwin|linux` × `x86_64|aarch64`. Binary + embedding model land in
@@ -34,7 +34,7 @@ Install the plugin — it wires up the MCP memory tools, the session hooks, a sk
 slash commands:
 
 ```text
-/plugin marketplace add MemPalace/fast-mempalace
+/plugin marketplace add debpalash/fast-mempalace
 /plugin install fast-mempalace
 ```
 
@@ -125,7 +125,7 @@ The embedding model must be **384-dim** (MiniLM-L6-v2); the vector table is decl
 Needs `zig 0.16.0` + `cmake`.
 
 ```bash
-git clone --recursive https://github.com/MemPalace/fast-mempalace
+git clone --recursive https://github.com/debpalash/fast-mempalace
 cd fast-mempalace
 
 # 1) Build the statically-linked llama.cpp backend (once)

@@ -17,13 +17,13 @@ Legend: 🏠 local service · 🍎 macOS · 🐧 Linux.
 ## 2. hesreallyhim/awesome-claude-code → tooling / MCP section
 
 ```
-- [fast-mempalace](https://github.com/MemPalace/fast-mempalace) - Persistent, local-first memory for Claude Code: an MCP memory server plus SessionStart/PreCompact hooks that auto-load context at session start and auto-save before compaction. One static binary, fully on-device.
+- [fast-mempalace](https://github.com/debpalash/fast-mempalace) - Persistent, local-first memory for Claude Code: an MCP memory server plus SessionStart/PreCompact hooks that auto-load context at session start and auto-save before compaction. One static binary, fully on-device.
 ```
 
 ## 3. catppuccin/awesome-zig (or zigcc/awesome-zig) → Applications / Tools
 
 ```
-- [fast-mempalace](https://github.com/MemPalace/fast-mempalace) - Local-first long-term memory engine for AI coding agents. Statically links llama.cpp + sqlite-vec into one binary; MCP server + Claude Code plugin.
+- [fast-mempalace](https://github.com/debpalash/fast-mempalace) - Local-first long-term memory engine for AI coding agents. Statically links llama.cpp + sqlite-vec into one binary; MCP server + Claude Code plugin.
 ```
 
 ## How to submit (per list)

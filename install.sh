@@ -2,17 +2,20 @@
 # Fast MemPalace installer — fetches prebuilt native binary + embedding model.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/MemPalace/fast-mempalace/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/debpalash/fast-mempalace/main/install.sh | bash
 #
 # Env overrides:
 #   FAST_MEMPALACE_VERSION   Release tag to install (default: latest)
 #   FAST_MEMPALACE_INSTALL   Install prefix (default: $HOME/.fast-mempalace)
-#   FAST_MEMPALACE_REPO      GitHub repo (default: MemPalace/fast-mempalace)
+#   FAST_MEMPALACE_REPO      GitHub repo (default: debpalash/fast-mempalace)
 #   FAST_MEMPALACE_NO_MODEL  Skip GGUF embedding model download (default: 0)
 
 set -euo pipefail
 
-REPO="${FAST_MEMPALACE_REPO:-MemPalace/fast-mempalace}"
+TMP_DIR=""
+trap '[ -n "$TMP_DIR" ] && rm -rf "$TMP_DIR"' EXIT
+
+REPO="${FAST_MEMPALACE_REPO:-debpalash/fast-mempalace}"
 VERSION="${FAST_MEMPALACE_VERSION:-latest}"
 INSTALL_DIR="${FAST_MEMPALACE_INSTALL:-$HOME/.fast-mempalace}"
 BIN_DIR="$INSTALL_DIR/bin"
@@ -72,15 +75,13 @@ install_binary() {
   local platform="$1"
   local tarball="fast-mempalace-${platform}.tar.gz"
   local url="https://github.com/$REPO/releases/download/$VERSION/$tarball"
-  local tmp
-  tmp=$(mktemp -d)
-  trap 'rm -rf "$tmp"' EXIT
+  TMP_DIR=$(mktemp -d)  # global so the EXIT trap can clean it after main returns
 
   mkdir -p "$BIN_DIR"
-  download "$url" "$tmp/$tarball"
-  tar -xzf "$tmp/$tarball" -C "$tmp"
-  [ -f "$tmp/fast-mempalace" ] || die "tarball missing 'fast-mempalace' binary"
-  install -m 755 "$tmp/fast-mempalace" "$BIN_DIR/fast-mempalace"
+  download "$url" "$TMP_DIR/$tarball"
+  tar -xzf "$TMP_DIR/$tarball" -C "$TMP_DIR"
+  [ -f "$TMP_DIR/fast-mempalace" ] || die "tarball missing 'fast-mempalace' binary"
+  install -m 755 "$TMP_DIR/fast-mempalace" "$BIN_DIR/fast-mempalace"
   ok "installed $BIN_DIR/fast-mempalace"
 }
 
@@ -119,7 +120,7 @@ shell_hint() {
     printf "  source %s\n\n" "$shell_rc"
   fi
   printf "%bQuick check:%b\n\n  fast-mempalace stats\n\n" "$C_BOLD" "$C_RESET"
-  printf "%bClaude Code:%b add persistent memory in two lines —\n\n  /plugin marketplace add MemPalace/fast-mempalace\n  /plugin install fast-mempalace\n\n" \
+  printf "%bClaude Code:%b add persistent memory in two lines —\n\n  /plugin marketplace add debpalash/fast-mempalace\n  /plugin install fast-mempalace\n\n" \
     "$C_BOLD" "$C_RESET"
   printf "%bSeed memory from a repo (optional):%b\n\n  fast-mempalace mine . my-project\n\n" "$C_BOLD" "$C_RESET"
   printf "%bDocs:%b https://github.com/%s\n" "$C_DIM" "$C_RESET" "$REPO"

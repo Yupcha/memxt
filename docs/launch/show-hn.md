@@ -14,13 +14,13 @@ It's one static binary. No Python, no Docker, no vector database to run, no API 
 no network call at query time. Your code and your memories never leave the machine.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/MemPalace/fast-mempalace/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/debpalash/fast-mempalace/main/install.sh | bash
 ```
 
 Then, in Claude Code:
 
 ```
-/plugin marketplace add MemPalace/fast-mempalace
+/plugin marketplace add debpalash/fast-mempalace
 /plugin install fast-mempalace
 ```
 
@@ -69,7 +69,7 @@ means there's no graph-query surface to poison.
 | Peak RAM (model loaded) | **~100 MB** | mostly the embedding model |
 
 Full method + a one-command reproduction is in
-[`BENCHMARK.md`](https://github.com/MemPalace/fast-mempalace/blob/main/BENCHMARK.md).
+[`BENCHMARK.md`](https://github.com/debpalash/fast-mempalace/blob/main/BENCHMARK.md).
 (I'll be upfront: an earlier version of this repo reported a `0.59 s` mine of 1,171
 drawers — that run used placeholder vectors. These are the real semantic engine.)
 
@@ -81,7 +81,7 @@ knowledge graph is there but populated manually for now. I'd love feedback on re
 quality and on the hook UX.
 
 MIT licensed. Code, plugin, and reproduction:
-**https://github.com/MemPalace/fast-mempalace**
+**https://github.com/debpalash/fast-mempalace**
 
 ---
 
