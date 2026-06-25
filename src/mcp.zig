@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════
-// fast-mempalace/mcp.zig — Model Context Protocol server (stdio JSON-RPC)
+// memxt/mcp.zig — Model Context Protocol server (stdio JSON-RPC)
 //
 // Exposes the memory palace to any MCP-capable agent (Claude Code, Cursor,
 // Zed, …) over newline-delimited JSON-RPC on stdin/stdout. Four real tools:
@@ -143,7 +143,7 @@ fn handleLine(
             }
         }
         const info = try std.fmt.allocPrint(allocator,
-            \\{{"protocolVersion":"{s}","capabilities":{{"tools":{{}}}},"serverInfo":{{"name":"fast-mempalace","version":"0.2.0"}}}}
+            \\{{"protocolVersion":"{s}","capabilities":{{"tools":{{}}}},"serverInfo":{{"name":"memxt","version":"0.2.0"}}}}
         , .{version});
         defer allocator.free(info);
         try sendRawResult(allocator, io, id, info);

@@ -119,11 +119,11 @@ jobs:
       - name: Execute CLI Validation (incl. real embeddings)
         run: |
           set -eux
-          ./zig-out/bin/fast-mempalace init
-          ./zig-out/bin/fast-mempalace stats
+          ./zig-out/bin/memxt init
+          ./zig-out/bin/memxt stats
           printf 'The deploy key id is QUASAR-77 and must never be logged.\n' > smoke.txt
-          ./zig-out/bin/fast-mempalace mine smoke.txt smoke
-          ./zig-out/bin/fast-mempalace search "what is the deploy key" 2>&1 | grep -q QUASAR-77
+          ./zig-out/bin/memxt mine smoke.txt smoke
+          ./zig-out/bin/memxt search "what is the deploy key" 2>&1 | grep -q QUASAR-77
 
       - name: Integration tests (mine / ranking / MCP / hooks / schema)
-        run: bash scripts/integration-test.sh ./zig-out/bin/fast-mempalace
+        run: bash scripts/integration-test.sh ./zig-out/bin/memxt

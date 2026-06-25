@@ -8,7 +8,7 @@ pub fn build(b: *std.Build) void {
 
     // ── Main executable ──
     const exe = b.addExecutable(.{
-        .name = "fast-mempalace",
+        .name = "memxt",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
             .target = target,
@@ -25,7 +25,7 @@ pub fn build(b: *std.Build) void {
     run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| run_cmd.addArgs(args);
 
-    const run_step = b.step("run", "Run fast-mempalace");
+    const run_step = b.step("run", "Run memxt");
     run_step.dependOn(&run_cmd.step);
 
     // ── Tests ──

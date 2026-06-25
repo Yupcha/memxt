@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════
-// fast-mempalace/knowledge.zig — Temporal Knowledge Graph
+// memxt/knowledge.zig — Temporal Knowledge Graph
 //
 // Manages entity-relationship triads (subject -> predicate -> object)
 // with temporal valid_from / valid_until tracking.

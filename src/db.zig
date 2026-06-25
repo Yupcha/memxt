@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════
-// fast-mempalace/db.zig — SQLite + sqlite-vec database engine
+// memxt/db.zig — SQLite + sqlite-vec database engine
 //
 // Provides the storage backbone: verbatim text in relational tables,
 // vector embeddings in sqlite-vec virtual tables, and temporal
@@ -97,13 +97,13 @@ pub const Database = struct {
 
     /// Bring an existing database up to SCHEMA_VERSION. Called from
     /// createPalaceSchema after the IF-NOT-EXISTS table creation. A palace from
-    /// a NEWER fast-mempalace is left untouched but flagged, so we never
+    /// a NEWER memxt is left untouched but flagged, so we never
     /// silently corrupt it.
     fn migrateSchema(self: *Database) void {
         const current = self.schemaVersion();
         if (current > SCHEMA_VERSION) {
             std.debug.print(
-                "warn: palace schema v{d} was created by a newer fast-mempalace (this build supports v{d}); some features may not work.\n",
+                "warn: palace schema v{d} was created by a newer memxt (this build supports v{d}); some features may not work.\n",
                 .{ current, SCHEMA_VERSION },
             );
             return;

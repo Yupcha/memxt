@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════
-// fast-mempalace/searcher.zig — Hybrid Search Engine
+// memxt/searcher.zig — Hybrid Search Engine
 //
 // Combines vector similarity with BM25-style keyword boosting and
 // temporal recency weighting.

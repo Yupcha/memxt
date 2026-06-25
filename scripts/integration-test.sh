@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# End-to-end integration tests for the fast-mempalace binary: directory mining,
+# End-to-end integration tests for the memxt binary: directory mining,
 # semantic ranking, the MCP protocol (store -> recall), the Claude Code hooks,
 # and schema versioning. Exercises the REAL binary, not unit-level mocks.
 #
 # Usage: scripts/integration-test.sh [path-to-binary]
-#   BIN defaults to ./zig-out/bin/fast-mempalace
-#   FAST_MEMPALACE_MODEL defaults to ./lib/minilm.gguf
+#   BIN defaults to ./zig-out/bin/memxt
+#   MEMXT_MODEL defaults to ./lib/minilm.gguf
 set -uo pipefail
 
-BIN="${1:-./zig-out/bin/fast-mempalace}"
-export FAST_MEMPALACE_MODEL="${FAST_MEMPALACE_MODEL:-$PWD/lib/minilm.gguf}"
+BIN="${1:-./zig-out/bin/memxt}"
+export MEMXT_MODEL="${MEMXT_MODEL:-$PWD/lib/minilm.gguf}"
 WORK="$(mktemp -d)"
-export FAST_MEMPALACE_DB="$WORK/palace.db"
+export MEMXT_DB="$WORK/palace.db"
 trap 'rm -rf "$WORK"' EXIT
 
 PASS=0; FAIL=0
@@ -20,16 +20,16 @@ bad()  { printf "  \033[31m✗ %s\033[0m\n" "$1"; FAIL=$((FAIL+1)); }
 have() { echo "$1" | grep -q -- "$2"; }
 
 [ -x "$BIN" ] || { echo "binary not found/executable: $BIN"; exit 1; }
-[ -f "$FAST_MEMPALACE_MODEL" ] || { echo "model not found: $FAST_MEMPALACE_MODEL"; exit 1; }
+[ -f "$MEMXT_MODEL" ] || { echo "model not found: $MEMXT_MODEL"; exit 1; }
 
-echo "fast-mempalace integration tests"
+echo "memxt integration tests"
 echo "  bin:   $BIN"
-echo "  model: $FAST_MEMPALACE_MODEL"
+echo "  model: $MEMXT_MODEL"
 
 "$BIN" init >/dev/null 2>&1
 
 # 1) schema version is stamped
-ver=$(sqlite3 "$FAST_MEMPALACE_DB" "PRAGMA user_version;" 2>/dev/null || echo "")
+ver=$(sqlite3 "$MEMXT_DB" "PRAGMA user_version;" 2>/dev/null || echo "")
 [ "$ver" = "1" ] && ok "schema version stamped (=1)" || bad "schema version not stamped (got '$ver')"
 
 # 2) directory mining ingests multiple files

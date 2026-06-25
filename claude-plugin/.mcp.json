@@ -1,11 +1,11 @@
 {
   "mcpServers": {
     "memory": {
-      "command": "${HOME}/.fast-mempalace/bin/fast-mempalace",
+      "command": "${HOME}/.memxt/bin/memxt",
       "args": ["mcp"],
       "env": {
-        "FAST_MEMPALACE_DB": "${HOME}/.fast-mempalace/palace.db",
-        "FAST_MEMPALACE_MODEL": "${HOME}/.fast-mempalace/lib/minilm.gguf"
+        "MEMXT_DB": "${HOME}/.memxt/palace.db",
+        "MEMXT_MODEL": "${HOME}/.memxt/lib/minilm.gguf"
       }
     }
   }

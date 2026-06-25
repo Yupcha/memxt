@@ -1,8 +1,8 @@
 # Dockerfile.ci — local mirror of the Ubuntu GitHub Actions build matrix.
 #
 # Usage:
-#   docker build -f Dockerfile.ci -t fast-mempalace-ci .
-#   docker run --rm fast-mempalace-ci
+#   docker build -f Dockerfile.ci -t memxt-ci .
+#   docker run --rm memxt-ci
 #
 # Or via the helper:
 #   ./scripts/ci-local.sh
@@ -89,4 +89,4 @@ RUN find lib/llama.cpp/build -name '*.a' -print | head -20 \
 
 RUN zig build --release=fast
 
-CMD ["sh", "-c", "./zig-out/bin/fast-mempalace init && ./zig-out/bin/fast-mempalace stats"]
+CMD ["sh", "-c", "./zig-out/bin/memxt init && ./zig-out/bin/memxt stats"]

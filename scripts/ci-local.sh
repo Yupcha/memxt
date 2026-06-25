@@ -11,7 +11,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-IMAGE="fast-mempalace-ci:local"
+IMAGE="memxt-ci:local"
 
 echo "==> Building CI image from Dockerfile.ci"
 docker build -f Dockerfile.ci -t "$IMAGE" .
@@ -19,7 +19,7 @@ docker build -f Dockerfile.ci -t "$IMAGE" .
 mode="${1:-run}"
 case "$mode" in
   run)
-    echo "==> Running smoke test (fast-mempalace stats)"
+    echo "==> Running smoke test (memxt stats)"
     docker run --rm "$IMAGE"
     ;;
   shell)

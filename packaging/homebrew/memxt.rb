@@ -1,31 +1,31 @@
-# Homebrew formula for fast-mempalace.
-# Lives in the tap repo (debpalash/homebrew-fast-mempalace); this copy is kept
+# Homebrew formula for memxt.
+# Lives in the tap repo (Yupcha/homebrew-memxt); this copy is kept
 # in-tree for reference. Binary sha256s are filled from the release .sha256
 # artifacts by scripts/update-tap.sh.
-class FastMempalace < Formula
+class Memxt < Formula
   desc "Local-first long-term memory for AI coding agents"
-  homepage "https://github.com/debpalash/fast-mempalace"
+  homepage "https://github.com/Yupcha/memxt"
   version "0.2.0"
   license "MIT"
 
   on_macos do
     on_arm do
-      url "https://github.com/debpalash/fast-mempalace/releases/download/v0.2.0/fast-mempalace-darwin-aarch64.tar.gz"
+      url "https://github.com/Yupcha/memxt/releases/download/v0.2.0/memxt-darwin-aarch64.tar.gz"
       sha256 "REPLACE_DARWIN_AARCH64"
     end
     on_intel do
-      url "https://github.com/debpalash/fast-mempalace/releases/download/v0.2.0/fast-mempalace-darwin-x86_64.tar.gz"
+      url "https://github.com/Yupcha/memxt/releases/download/v0.2.0/memxt-darwin-x86_64.tar.gz"
       sha256 "REPLACE_DARWIN_X86_64"
     end
   end
 
   on_linux do
     on_arm do
-      url "https://github.com/debpalash/fast-mempalace/releases/download/v0.2.0/fast-mempalace-linux-aarch64.tar.gz"
+      url "https://github.com/Yupcha/memxt/releases/download/v0.2.0/memxt-linux-aarch64.tar.gz"
       sha256 "REPLACE_LINUX_AARCH64"
     end
     on_intel do
-      url "https://github.com/debpalash/fast-mempalace/releases/download/v0.2.0/fast-mempalace-linux-x86_64.tar.gz"
+      url "https://github.com/Yupcha/memxt/releases/download/v0.2.0/memxt-linux-x86_64.tar.gz"
       sha256 "REPLACE_LINUX_X86_64"
     end
   end
@@ -37,30 +37,30 @@ class FastMempalace < Formula
   end
 
   def install
-    libexec.install "fast-mempalace"
+    libexec.install "memxt"
     resource("model").stage do
       libexec.install "all-MiniLM-L6-v2.F16.gguf" => "minilm.gguf"
     end
     # Wrapper pins the bundled model so the binary works with zero config.
-    (bin/"fast-mempalace").write <<~SH
+    (bin/"memxt").write <<~SH
       #!/bin/bash
-      export FAST_MEMPALACE_MODEL="${FAST_MEMPALACE_MODEL:-#{libexec}/minilm.gguf}"
-      exec "#{libexec}/fast-mempalace" "$@"
+      export MEMXT_MODEL="${MEMXT_MODEL:-#{libexec}/minilm.gguf}"
+      exec "#{libexec}/memxt" "$@"
     SH
   end
 
   def caveats
     <<~EOS
       Add persistent memory to Claude Code:
-        /plugin marketplace add MemPalace/fast-mempalace
-        /plugin install fast-mempalace
+        /plugin marketplace add Yupcha/memxt
+        /plugin install memxt
 
       Memory lives in a single local palace; nothing leaves your machine.
     EOS
   end
 
   test do
-    system bin/"fast-mempalace", "init"
-    assert_match "Memory Palace Stats", shell_output("#{bin}/fast-mempalace stats")
+    system bin/"memxt", "init"
+    assert_match "memxt", shell_output("#{bin}/memxt stats")
   end
 end

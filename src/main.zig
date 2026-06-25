@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════
-// fast-mempalace — Local-first AI Memory System (Zig 0.16)
+// memxt — Local-first AI Memory System (Zig 0.16)
 // ═══════════════════════════════════════════════════════════════════
 
 const std = @import("std");
@@ -37,7 +37,7 @@ pub fn main(init: std.process.Init) !void {
         defer embedder.deinitGlobal();
 
         const path = args_it.next() orelse {
-            std.debug.print("Usage: fast-mempalace mine <path> [wing]\n", .{});
+            std.debug.print("Usage: memxt mine <path> [wing]\n", .{});
             return;
         };
         const wing = args_it.next() orelse cfg.default_wing;
@@ -47,7 +47,7 @@ pub fn main(init: std.process.Init) !void {
         defer embedder.deinitGlobal();
 
         const query = args_it.next() orelse {
-            std.debug.print("Usage: fast-mempalace search <query>\n", .{});
+            std.debug.print("Usage: memxt search <query>\n", .{});
             return;
         };
         try cmdSearch(query, &cfg, allocator, init.io);
@@ -93,18 +93,18 @@ pub fn main(init: std.process.Init) !void {
 fn printUsage() void {
     std.debug.print(
         \\
-        \\  🏛️  fast-mempalace — Local-first AI Memory System (Zig Native Engine)
+        \\  🏛️  memxt — Local-first AI Memory System (Zig Native Engine)
         \\
         \\  Usage:
-        \\    fast-mempalace init                  Initialize palace database
-        \\    fast-mempalace mine <path> [wing]    Mine files into the palace
-        \\    fast-mempalace search <query>        Semantic search
-        \\    fast-mempalace stats                 Palace statistics
-        \\    fast-mempalace kg [subject]          Query knowledge graph
-        \\    fast-mempalace wake-up [--wing X]    Show L0+L1 wake-up context
-        \\    fast-mempalace hook                  Run hook (JSON stdin/stdout)
-        \\    fast-mempalace instructions          Output skill instructions
-        \\    fast-mempalace mcp                   Start MCP JSON-RPC server
+        \\    memxt init                  Initialize palace database
+        \\    memxt mine <path> [wing]    Mine files into the palace
+        \\    memxt search <query>        Semantic search
+        \\    memxt stats                 Palace statistics
+        \\    memxt kg [subject]          Query knowledge graph
+        \\    memxt wake-up [--wing X]    Show L0+L1 wake-up context
+        \\    memxt hook                  Run hook (JSON stdin/stdout)
+        \\    memxt instructions          Output skill instructions
+        \\    memxt mcp                   Start MCP JSON-RPC server
         \\
     , .{});
 }
@@ -114,7 +114,7 @@ fn openDb(cfg: *const config.Config) !db.Database {
 }
 
 fn cmdInit(cfg: *const config.Config) !void {
-    std.debug.print("Initializing Fast MemPalace database...\n", .{});
+    std.debug.print("Initializing memxt database...\n", .{});
     var database = try openDb(cfg);
     defer database.close();
     database.createPalaceSchema();
@@ -265,7 +265,7 @@ fn cmdHook(cfg: *const config.Config, allocator: std.mem.Allocator) !void {
 
 fn cmdInstructions() void {
     const instructions =
-        \\# Fast MemPalace — Memory Instructions
+        \\# memxt — Memory Instructions
         \\
         \\You have a persistent, local-first memory palace. It survives across
         \\sessions and never leaves this machine. Content is organized into Wings
@@ -278,9 +278,9 @@ fn cmdInstructions() void {
         \\- `memory_stats`  — palace statistics.
         \\
         \\## CLI (scripting / seeding)
-        \\- `fast-mempalace mine <path> [wing]` — ingest a file or directory.
-        \\- `fast-mempalace search "<query>"`   — semantic search.
-        \\- `fast-mempalace wake-up [--wing X]` — print the wake-up context.
+        \\- `memxt mine <path> [wing]` — ingest a file or directory.
+        \\- `memxt search "<query>"`   — semantic search.
+        \\- `memxt wake-up [--wing X]` — print the wake-up context.
         \\
         \\## Best practices
         \\1. Recall before you answer anything about past decisions or conventions.
@@ -298,7 +298,7 @@ fn cmdInstructions() void {
 // Requires tests cleanly resolving inside explicitly referenced files
 // ═══════════════════════════════════════════════════════════════════
 
-test "fast-mempalace unified testing suite" {
+test "memxt unified testing suite" {
     _ = @import("db.zig");
     // Add additional explicit module testing dependencies below here
 }

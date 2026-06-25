@@ -115,29 +115,29 @@ jobs:
       - name: Smoke test (incl. real embeddings)
         run: |
           set -eux
-          ./zig-out/bin/fast-mempalace init
-          ./zig-out/bin/fast-mempalace stats
+          ./zig-out/bin/memxt init
+          ./zig-out/bin/memxt stats
           # Validate the full semantic path: mine a file, then recall it.
           printf 'The deploy key id is QUASAR-77 and must never be logged.\n' > smoke.txt
-          ./zig-out/bin/fast-mempalace mine smoke.txt smoke
-          ./zig-out/bin/fast-mempalace search "what is the deploy key" 2>&1 | grep -q QUASAR-77
+          ./zig-out/bin/memxt mine smoke.txt smoke
+          ./zig-out/bin/memxt search "what is the deploy key" 2>&1 | grep -q QUASAR-77
 
       - name: Package tarball
         env:
           TARGET: ${{ matrix.target }}
         run: |
-          TARBALL="fast-mempalace-${TARGET}.tar.gz"
-          tar -czf "$TARBALL" -C zig-out/bin fast-mempalace
+          TARBALL="memxt-${TARGET}.tar.gz"
+          tar -czf "$TARBALL" -C zig-out/bin memxt
           shasum -a 256 "$TARBALL" > "$TARBALL.sha256"
           ls -lh "$TARBALL" "$TARBALL.sha256"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: fast-mempalace-${{ matrix.target }}
+          name: memxt-${{ matrix.target }}
           path: |
-            fast-mempalace-${{ matrix.target }}.tar.gz
-            fast-mempalace-${{ matrix.target }}.tar.gz.sha256
+            memxt-${{ matrix.target }}.tar.gz
+            memxt-${{ matrix.target }}.tar.gz.sha256
 
   release:
     name: Publish GitHub Release
@@ -164,7 +164,7 @@ jobs:
             Install with one line:
 
             ```bash
-            curl -fsSL https://raw.githubusercontent.com/MemPalace/fast-mempalace/main/install.sh | bash
+            curl -fsSL https://raw.githubusercontent.com/Yupcha/memxt/main/install.sh | bash
             ```
 
             Prebuilt binaries attached for darwin-aarch64, darwin-x86_64, linux-x86_64, linux-aarch64.

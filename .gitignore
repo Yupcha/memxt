@@ -4,7 +4,7 @@ zig-out/
 .zig-cache/
 
 # Executables
-fast-mempalace
+memxt
 mempalace
 
 # IDE / OS
@@ -27,7 +27,7 @@ lib/*.gguf
 lib/llama.cpp/build/
 
 # External Configs mapping over default parameters
-fast-mempalace.yaml
+memxt.yaml
 mempalace.yaml
 lib/llama.cpp
 .claude/

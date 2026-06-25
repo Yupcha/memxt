@@ -1,9 +1,9 @@
 ---
 name: using-memory
-description: Use the local Fast MemPalace memory to recall past decisions, code, and context, and to persist new ones. Invoke whenever the user refers to prior work ("what did we decide", "how did we", "last time", "remember when") or makes a decision worth keeping.
+description: Use the local memxt memory to recall past decisions, code, and context, and to persist new ones. Invoke whenever the user refers to prior work ("what did we decide", "how did we", "last time", "remember when") or makes a decision worth keeping.
 ---
 
-# Using Fast MemPalace memory
+# Using memxt memory
 
 You have a persistent, local memory palace via the `memory` MCP server. It survives
 across sessions and never leaves this machine. Four tools:
