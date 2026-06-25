@@ -1,6 +1,6 @@
 # 🗺️ Roadmap — Parity & Outmatch
 
-Path from `fast-mempalace` today to **full drop-in parity** with the upstream Python `mempalace` package, then to **outmatching** it with capabilities the Python stack cannot reach.
+Path from `memxt` today to **full drop-in parity** with the upstream Python `mempalace` package, then to **outmatching** it with capabilities the Python stack cannot reach.
 
 Legend: `[x]` done · `[~]` partial · `[ ]` planned
 
@@ -19,10 +19,10 @@ against Claude Code 2.1.191.
 - [x] `wake-up [--wing X]` — L0+L1 context loader (~600–900 tok)
 - [x] **`mcp` — real MCP server**: `memory_search` / `memory_store` / `memory_wake_up` / `memory_stats`, lazy model load, protocol-version echo (was a hardcoded stub)
 - [x] **`hook` — real Claude Code protocol**: SessionStart injects wake-up via `additionalContext`; PreCompact reads the transcript and **auto-saves** the tail (was a custom protocol + a nag)
-- [x] **Claude Code plugin** — `claude-plugin/` + marketplace manifest: MCP server + hooks + `using-memory` skill + `/remember` `/recall` commands; one global palace via `FAST_MEMPALACE_DB`/`_MODEL` env overrides
+- [x] **Claude Code plugin** — `claude-plugin/` + marketplace manifest: MCP server + hooks + `using-memory` skill + `/remember` `/recall` commands; one global palace via `MEMXT_DB`/`_MODEL` env overrides
 - [x] `kg [subject]` — knowledge-graph relationship query (manual population)
 - [x] `instructions` — memory-instruction emitter
-- [x] `mempalace.yaml` + `fast-mempalace.yaml` config + env-var overrides
+- [x] `mempalace.yaml` + `memxt.yaml` config + env-var overrides
 - [x] MIT license, GitHub Actions CI, one-line curl installer (now fetches a **384-dim** model)
 - [x] Honest benchmarks vs the real engine (`BENCHMARK.md`); retrieval 7/7 top-1 on a paraphrase test
 
@@ -40,13 +40,13 @@ Close every remaining gap with the upstream `pip install mempalace` surface. Eac
 - [ ] **`init` vs `stats`** — upstream uses `init`; alias our `stats` where appropriate
 - [ ] **Incremental re-mining** — content-hash skip for unchanged files (currently re-embeds all)
 - [ ] **`forget <id|wing>`** — evict drawers
-- [ ] **Export / import** — `fast-mempalace export <path>` JSONL dump + re-ingest round-trip
+- [ ] **Export / import** — `memxt export <path>` JSONL dump + re-ingest round-trip
 - [ ] **Ignore-pattern parity** — `.gitignore`-style globs matching upstream semantics
 - [ ] **Config schema audit** — every upstream yaml key respected or rejected with a diagnostic
 - [ ] **Python-parity output strings** — exit codes, stderr format, progress-bar layout for script consumers
 - [ ] **Embedding model swap** — allow upstream's default model name via `model: <name>` resolving to HF URL
 
-**Definition of done:** a user can `pip uninstall mempalace && curl ... | bash && ln -s .../fast-mempalace .../mempalace` and every script in their pipeline keeps working unchanged.
+**Definition of done:** a user can `pip uninstall mempalace && curl ... | bash && ln -s .../memxt .../mempalace` and every script in their pipeline keeps working unchanged.
 
 ---
 
@@ -59,23 +59,23 @@ Ship features upstream Python cannot match without rewriting. Each lands a capab
 - [ ] **Batched embedding kernel** — vectorize mine across N files per GPU call (target: 10× mine throughput vs current 200×)
 - [ ] **Incremental vector index** — sqlite-vec HNSW params tuned per drawer-count bucket
 - [ ] **Zero-copy mmap ingest** — large file mining without full read-into-RAM
-- [ ] **Compile-time schema** — Zig comptime validation of `fast-mempalace.yaml`; bad config fails at build, not runtime
+- [ ] **Compile-time schema** — Zig comptime validation of `memxt.yaml`; bad config fails at build, not runtime
 
 ### v0.4 — Reach Beyond CLI
 
-- [ ] **Watch mode** — `fast-mempalace watch <path>` file-system events → auto re-mine (upstream Python blocks on ChromaDB lock; we don't)
-- [ ] **Embedded HTTP API** — `fast-mempalace serve --port 8080` pure Zig handler, <5 MB RAM overhead
+- [ ] **Watch mode** — `memxt watch <path>` file-system events → auto re-mine (upstream Python blocks on ChromaDB lock; we don't)
+- [ ] **Embedded HTTP API** — `memxt serve --port 8080` pure Zig handler, <5 MB RAM overhead
 - [ ] **Web UI** — single-file static dashboard shipped inside binary (SQLite browser + search box)
 - [ ] **Hybrid search** — BM25 + vector fusion (upstream is vector-only)
 - [ ] **Time-scoped queries** — `--since 2026-01-01`, `--until`, decay-weighted ranking
 
 ### v0.5 — Ecosystem & Distribution
 
-- [ ] **Homebrew formula** — `brew install fast-mempalace`
+- [ ] **Homebrew formula** — `brew install memxt`
 - [ ] **Docker image** — ~15 MB distroless image (vs upstream ~1.2 GB Python+ML)
 - [ ] **Shell completions** — zsh / bash / fish
 - [x] **Claude Code plugin** — `claude-plugin/` wires MCP + hooks + skill + slash commands (v0.2)
-- [ ] **Plugin SDK** — stable `lib/fast_mempalace.h` C ABI for 3rd-party languages
+- [ ] **Plugin SDK** — stable `lib/memxt.h` C ABI for 3rd-party languages
 
 ### v0.6+ — Intelligence Layer
 

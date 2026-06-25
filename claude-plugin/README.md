@@ -1,4 +1,4 @@
-# Fast MemPalace — Claude Code plugin
+# memxt — Claude Code plugin
 
 Gives Claude Code a persistent, **local-first** memory. Your agent remembers your
 codebase, your decisions, and your conventions across sessions — and nothing ever
@@ -20,24 +20,24 @@ leaves your machine.
 1. Install the engine (single static binary + 45 MB embedding model, fully local):
 
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/debpalash/fast-mempalace/main/install.sh | bash
+   curl -fsSL https://raw.githubusercontent.com/Yupcha/memxt/main/install.sh | bash
    ```
 
 2. Add the plugin in Claude Code:
 
    ```
-   /plugin marketplace add debpalash/fast-mempalace
-   /plugin install fast-mempalace
+   /plugin marketplace add Yupcha/memxt
+   /plugin install memxt
    ```
 
-That's it. Memory lives in a single global palace at `~/.fast-mempalace/palace.db`.
+That's it. Memory lives in a single global palace at `~/.memxt/palace.db`.
 
 ## Seed memory from a codebase (optional)
 
 ```bash
-FAST_MEMPALACE_DB=~/.fast-mempalace/palace.db \
-FAST_MEMPALACE_MODEL=~/.fast-mempalace/lib/minilm.gguf \
-~/.fast-mempalace/bin/fast-mempalace mine . my-project
+MEMXT_DB=~/.memxt/palace.db \
+MEMXT_MODEL=~/.memxt/lib/minilm.gguf \
+~/.memxt/bin/memxt mine . my-project
 ```
 
 ## Privacy

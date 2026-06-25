@@ -7,7 +7,7 @@ const c = @cImport({
 
 pub const Config = struct {
     default_wing: [:0]const u8 = "default",
-    database_path: [:0]const u8 = "fast-mempalace.db",
+    database_path: [:0]const u8 = "memxt.db",
     model_path: [:0]const u8 = "lib/minilm.gguf",
     auto_accept_entities: bool = false,
     ignore_patterns: [][]const u8 = &[_][]const u8{},
@@ -21,7 +21,7 @@ pub const Config = struct {
         if (!std.mem.eql(u8, self.default_wing, "default")) {
             allocator.free(self.default_wing);
         }
-        if (!std.mem.eql(u8, self.database_path, "fast-mempalace.db")) {
+        if (!std.mem.eql(u8, self.database_path, "memxt.db")) {
             allocator.free(self.database_path);
         }
         if (!std.mem.eql(u8, self.model_path, "lib/minilm.gguf")) {
@@ -30,11 +30,11 @@ pub const Config = struct {
     }
 };
 
-/// Attempt to load config from the current directory. Tries `fast-mempalace.yaml`
+/// Attempt to load config from the current directory. Tries `memxt.yaml`
 /// first, then falls back to `mempalace.yaml` for drop-in compatibility with the
 /// legacy Python package. Returns defaults if neither exists.
 pub fn load(allocator: std.mem.Allocator, io: std.Io) !Config {
-    var file = std.Io.Dir.cwd().openFile(io, "fast-mempalace.yaml", .{}) catch |err1| blk: {
+    var file = std.Io.Dir.cwd().openFile(io, "memxt.yaml", .{}) catch |err1| blk: {
         if (err1 != error.FileNotFound) return err1;
         break :blk std.Io.Dir.cwd().openFile(io, "mempalace.yaml", .{}) catch |err2| {
             if (err2 == error.FileNotFound) return Config{};
@@ -76,7 +76,7 @@ pub fn load(allocator: std.mem.Allocator, io: std.Io) !Config {
         } else if (std.mem.startsWith(u8, line, "database_path:")) {
             in_ignore_patterns = false;
             const val = extractYamlValue(line["database_path:".len..]);
-            if (val.len > 0 and !std.mem.eql(u8, val, "fast-mempalace.db")) {
+            if (val.len > 0 and !std.mem.eql(u8, val, "memxt.db")) {
                 cfg.database_path = try allocator.dupeZ(u8, val);
             }
         } else if (std.mem.startsWith(u8, line, "model_path:")) {
@@ -118,13 +118,13 @@ pub fn load(allocator: std.mem.Allocator, io: std.Io) !Config {
 /// Apply environment-variable overrides. These take precedence over the yaml
 /// and defaults, and are how the Claude Code plugin pins a single global palace
 /// and model regardless of which project directory the agent is launched in:
-///   FAST_MEMPALACE_DB     → database_path
-///   FAST_MEMPALACE_MODEL  → model_path
-///   FAST_MEMPALACE_WING   → default_wing
+///   MEMXT_DB     → database_path
+///   MEMXT_MODEL  → model_path
+///   MEMXT_WING   → default_wing
 pub fn applyEnvOverrides(cfg: *Config, allocator: std.mem.Allocator) void {
-    overrideZ(&cfg.database_path, "fast-mempalace.db", "FAST_MEMPALACE_DB", allocator);
-    overrideZ(&cfg.model_path, "lib/minilm.gguf", "FAST_MEMPALACE_MODEL", allocator);
-    overrideZ(&cfg.default_wing, "default", "FAST_MEMPALACE_WING", allocator);
+    overrideZ(&cfg.database_path, "memxt.db", "MEMXT_DB", allocator);
+    overrideZ(&cfg.model_path, "lib/minilm.gguf", "MEMXT_MODEL", allocator);
+    overrideZ(&cfg.default_wing, "default", "MEMXT_WING", allocator);
     resolveModelPath(cfg, allocator);
 }
 
@@ -134,14 +134,14 @@ fn fileExists(path: [:0]const u8) bool {
 
 /// If the configured model isn't where it points, fall back to the curl
 /// installer's standard location so an installed binary finds its model with
-/// zero config: ~/.fast-mempalace/lib/minilm.gguf. (The Homebrew formula sets
-/// FAST_MEMPALACE_MODEL explicitly via a wrapper, so it never reaches here.)
+/// zero config: ~/.memxt/lib/minilm.gguf. (The Homebrew formula sets
+/// MEMXT_MODEL explicitly via a wrapper, so it never reaches here.)
 fn resolveModelPath(cfg: *Config, allocator: std.mem.Allocator) void {
     if (fileExists(cfg.model_path)) return;
 
     const home_raw = c.getenv("HOME") orelse return;
     const home = std.mem.span(home_raw);
-    const tmp = std.fmt.allocPrint(allocator, "{s}/.fast-mempalace/lib/minilm.gguf", .{home}) catch return;
+    const tmp = std.fmt.allocPrint(allocator, "{s}/.memxt/lib/minilm.gguf", .{home}) catch return;
     defer allocator.free(tmp);
     const cand = allocator.dupeZ(u8, tmp) catch return;
     if (fileExists(cand)) {

@@ -1,11 +1,11 @@
 // ═══════════════════════════════════════════════════════════════════
-// fast-mempalace/wakeup.zig — L0+L1 Wake-Up Context Generator
+// memxt/wakeup.zig — L0+L1 Wake-Up Context Generator
 //
 // Generates a compact ~600-900 token context payload from the palace
 // for injecting into AI session starts. Compatible with the Python
 // mempalace wake-up protocol.
 //
-//   Layer 0: Identity       (~100 tokens) — ~/.fast-mempalace/identity.txt
+//   Layer 0: Identity       (~100 tokens) — ~/.memxt/identity.txt
 //   Layer 1: Essential Story (~500-800)   — Top drawers by recency
 // ═══════════════════════════════════════════════════════════════════
 
@@ -46,7 +46,7 @@ pub fn generate(database: *db.Database, wing_filter: ?[]const u8, allocator: All
     ;
 
     const stmt = database.prepare(sql) orelse {
-        const no_palace = try std.fmt.allocPrint(allocator, "{s}No palace found. Run: fast-mempalace mine <dir>\n", .{result});
+        const no_palace = try std.fmt.allocPrint(allocator, "{s}No palace found. Run: memxt mine <dir>\n", .{result});
         allocator.free(result);
         return no_palace;
     };
@@ -85,7 +85,7 @@ pub fn generate(database: *db.Database, wing_filter: ?[]const u8, allocator: All
     }
 
     if (count == 0) {
-        const empty = try std.fmt.allocPrint(allocator, "{s}Palace is empty. Run: fast-mempalace mine <dir>\n", .{result});
+        const empty = try std.fmt.allocPrint(allocator, "{s}Palace is empty. Run: memxt mine <dir>\n", .{result});
         allocator.free(result);
         return empty;
     }
@@ -108,19 +108,19 @@ const c_env = @cImport({
 fn loadIdentity(allocator: Allocator) IdentityResult {
     const home_ptr = c_env.getenv("HOME");
     if (home_ptr == null) return .{
-        .text = "No identity configured. Create ~/.fast-mempalace/identity.txt",
+        .text = "No identity configured. Create ~/.memxt/identity.txt",
         .allocated = false,
     };
     const home = std.mem.span(home_ptr);
-    const path = std.fmt.allocPrint(allocator, "{s}/.fast-mempalace/identity.txt\x00", .{home}) catch return .{
-        .text = "No identity configured. Create ~/.fast-mempalace/identity.txt",
+    const path = std.fmt.allocPrint(allocator, "{s}/.memxt/identity.txt\x00", .{home}) catch return .{
+        .text = "No identity configured. Create ~/.memxt/identity.txt",
         .allocated = false,
     };
     defer allocator.free(path);
 
     const file = c_env.fopen(path.ptr, "r");
     if (file == null) return .{
-        .text = "No identity configured. Create ~/.fast-mempalace/identity.txt",
+        .text = "No identity configured. Create ~/.memxt/identity.txt",
         .allocated = false,
     };
     defer _ = c_env.fclose(file);
@@ -135,7 +135,7 @@ fn loadIdentity(allocator: Allocator) IdentityResult {
     if (bytes_read == 0) {
         allocator.free(buf);
         return .{
-            .text = "No identity configured. Create ~/.fast-mempalace/identity.txt",
+            .text = "No identity configured. Create ~/.memxt/identity.txt",
             .allocated = false,
         };
     }

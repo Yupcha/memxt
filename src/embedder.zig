@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════
-// fast-mempalace/embedder.zig — Local Vector Embeddings (llama.cpp)
+// memxt/embedder.zig — Local Vector Embeddings (llama.cpp)
 //
 // Runs a GGUF sentence-embedding model (default: MiniLM-L6-v2, 384-dim)
 // fully on-device via statically-linked llama.cpp. Encoder models use
@@ -62,7 +62,7 @@ pub const Embedder = struct {
         if (n_embd != EMBEDDING_DIM) {
             // Dimension mismatch would silently break vec0 inserts/search.
             std.debug.print(
-                "fast-mempalace: model embedding dim {d} != expected {d}. Use a {d}-dim model.\n",
+                "memxt: model embedding dim {d} != expected {d}. Use a {d}-dim model.\n",
                 .{ n_embd, EMBEDDING_DIM, EMBEDDING_DIM },
             );
             return error.EmbeddingDimMismatch;

@@ -9,19 +9,19 @@ we chose SQLite over Postgres, and the agent still contradicts a decision we mad
 week. The fix everyone reaches for — a cloud "memory layer" — means shipping my
 proprietary code to someone else's server and paying per token to remember my own work.
 
-So I built **fast-mempalace**: a persistent, **local-first** memory for AI coding agents.
+So I built **memxt**: a persistent, **local-first** memory for AI coding agents.
 It's one static binary. No Python, no Docker, no vector database to run, no API key, and
 no network call at query time. Your code and your memories never leave the machine.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/debpalash/fast-mempalace/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Yupcha/memxt/main/install.sh | bash
 ```
 
 Then, in Claude Code:
 
 ```
-/plugin marketplace add debpalash/fast-mempalace
-/plugin install fast-mempalace
+/plugin marketplace add Yupcha/memxt
+/plugin install memxt
 ```
 
 That's the whole setup. The agent now gets four memory tools over MCP
@@ -52,7 +52,7 @@ Almost every agent-memory tool today is a Python or Node package sitting on top 
 vector DB (Chroma, pgvector, Pinecone) or a managed cloud service. That's a dependency
 tree, a service to run, and — for the cloud ones — your data on someone else's box.
 
-fast-mempalace is `llama.cpp` + `sqlite-vec` statically linked into one ~6 MB
+memxt is `llama.cpp` + `sqlite-vec` statically linked into one ~6 MB
 executable. Embeddings (MiniLM-L6-v2, 384-dim) run on-device via Metal/CUDA. Storage is
 one SQLite file. There's nothing to stand up and nothing to phone home. Memories are
 stored **verbatim** — never silently rewritten or summarized by an LLM — which also
@@ -69,7 +69,7 @@ means there's no graph-query surface to poison.
 | Peak RAM (model loaded) | **~100 MB** | mostly the embedding model |
 
 Full method + a one-command reproduction is in
-[`BENCHMARK.md`](https://github.com/debpalash/fast-mempalace/blob/main/BENCHMARK.md).
+[`BENCHMARK.md`](https://github.com/Yupcha/memxt/blob/main/BENCHMARK.md).
 (I'll be upfront: an earlier version of this repo reported a `0.59 s` mine of 1,171
 drawers — that run used placeholder vectors. These are the real semantic engine.)
 
@@ -81,11 +81,11 @@ knowledge graph is there but populated manually for now. I'd love feedback on re
 quality and on the hook UX.
 
 MIT licensed. Code, plugin, and reproduction:
-**https://github.com/debpalash/fast-mempalace**
+**https://github.com/Yupcha/memxt**
 
 ---
 
 ### Title options
-- `Show HN: fast-mempalace – local-first memory for AI agents in a single Zig binary (no vector DB)`
+- `Show HN: memxt – local-first memory for AI agents in a single Zig binary (no vector DB)`
 - `Show HN: I gave Claude Code a persistent memory that never leaves my machine`
 - *(r/LocalLLaMA)* `Local-first memory for coding agents: llama.cpp + sqlite-vec in one static binary, no cloud`

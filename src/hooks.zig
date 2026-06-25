@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════
-// fast-mempalace/hooks.zig — Claude Code hook protocol (real, 2026)
+// memxt/hooks.zig — Claude Code hook protocol (real, 2026)
 //
 // Reads the hook event JSON on stdin, performs a side effect, and writes
 // the documented JSON response on stdout. Two events matter for memory:

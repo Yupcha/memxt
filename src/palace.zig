@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════
-// fast-mempalace/palace.zig — Palace Engine
+// memxt/palace.zig — Palace Engine
 //
 // The core "memory palace" abstraction. Content is organized into:
 //   Wing  → A project, person, or top-level domain
@@ -340,7 +340,7 @@ pub const Palace = struct {
 
         return std.fmt.allocPrint(allocator,
             \\╔═══════════════════════════════════╗
-            \\║       🏛️  Memory Palace Stats      ║
+            \\║       🏛️  memxt — memory stats     ║
             \\╠═══════════════════════════════════╣
             \\║  Wings:    {d:>8}                 ║
             \\║  Rooms:    {d:>8}                 ║

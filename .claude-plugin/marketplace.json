@@ -1,15 +1,15 @@
 {
-  "name": "mempalace",
-  "owner": { "name": "MemPalace", "url": "https://github.com/debpalash" },
+  "name": "memxt",
+  "owner": { "name": "Yupcha", "url": "https://github.com/Yupcha" },
   "metadata": {
     "description": "Local-first memory for AI coding agents.",
     "version": "0.2.0"
   },
   "plugins": [
     {
-      "name": "fast-mempalace",
+      "name": "memxt",
       "source": "./claude-plugin",
-      "description": "Persistent, private, local memory for Claude Code — your agent remembers your code and decisions across sessions. One static binary, no cloud. Requires the fast-mempalace binary (curl install).",
+      "description": "Persistent, private, local memory for Claude Code — your agent remembers your code and decisions across sessions. One static binary, no cloud. Requires the memxt binary (curl install).",
       "version": "0.2.0",
       "license": "MIT",
       "keywords": ["memory", "local-first", "mcp", "privacy"]

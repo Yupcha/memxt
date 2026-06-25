@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════
-// fast-mempalace/miner.zig — Content Mining Engine
+// memxt/miner.zig — Content Mining Engine
 //
 // Ingests project files and conversation exports into the palace.
 // Handles chunking, deduplication, and room auto-detection.
@@ -351,7 +351,7 @@ fn shouldSkipFile(basename: []const u8) bool {
     // mines itself.
     if (std.mem.indexOf(u8, basename, ".db-wal") != null) return true;
     if (std.mem.indexOf(u8, basename, ".db-shm") != null) return true;
-    if (std.mem.indexOf(u8, basename, "fast-mempalace.db") != null) return true;
+    if (std.mem.indexOf(u8, basename, "memxt.db") != null) return true;
     if (std.mem.indexOf(u8, basename, "mempalace.db") != null) return true;
 
     // Skip known directories in filenames

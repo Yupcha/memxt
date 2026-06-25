@@ -1,6 +1,6 @@
 # Launch kit
 
-Assets for launching fast-mempalace.
+Assets for launching memxt.
 
 - **`show-hn.md`** — the launch post (Show HN / r/LocalLLaMA / r/mcp). Builder voice,
   reproducible numbers, no superlatives. Includes title options.

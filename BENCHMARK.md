@@ -1,4 +1,4 @@
-# ⏱️ fast-mempalace Benchmarks
+# ⏱️ memxt Benchmarks
 
 Absolute performance of the real semantic engine (`llama.cpp` MiniLM-L6-v2 embeddings +
 `sqlite-vec`). Hardware: Apple Silicon, macOS, Metal backend. Each command run cold
@@ -47,14 +47,14 @@ unrelated topics ~0.03.
 zig build --release=fast
 
 # point at a 384-dim model
-export FAST_MEMPALACE_MODEL=$PWD/lib/minilm.gguf
-export FAST_MEMPALACE_DB=/tmp/bench.db
+export MEMXT_MODEL=$PWD/lib/minilm.gguf
+export MEMXT_DB=/tmp/bench.db
 
-./zig-out/bin/fast-mempalace init
-/usr/bin/time -p ./zig-out/bin/fast-mempalace mine ./src bench     # mine a directory
-/usr/bin/time -p ./zig-out/bin/fast-mempalace search "how does search ranking work"
-/usr/bin/time -p ./zig-out/bin/fast-mempalace wake-up
+./zig-out/bin/memxt init
+/usr/bin/time -p ./zig-out/bin/memxt mine ./src bench     # mine a directory
+/usr/bin/time -p ./zig-out/bin/memxt search "how does search ranking work"
+/usr/bin/time -p ./zig-out/bin/memxt wake-up
 ```
 
-For warm MCP-server latency, start `fast-mempalace mcp` and issue repeated
+For warm MCP-server latency, start `memxt mcp` and issue repeated
 `tools/call → memory_search` requests over stdio; only the first pays the model-load cost.

@@ -1,7 +1,7 @@
 .{
-    .name = .fast_mempalace,
+    .name = .memxt,
     .version = "0.1.0",
-    .fingerprint = 0x182ae31931ffe1cb,
+    .fingerprint = 0x5bf95d78bca15787,
     .minimum_zig_version = "0.16.0",
     .paths = .{
         "build.zig",

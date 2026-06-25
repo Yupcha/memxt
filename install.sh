@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
-# Fast MemPalace installer — fetches prebuilt native binary + embedding model.
+# memxt installer — fetches prebuilt native binary + embedding model.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/debpalash/fast-mempalace/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/Yupcha/memxt/main/install.sh | bash
 #
 # Env overrides:
-#   FAST_MEMPALACE_VERSION   Release tag to install (default: latest)
-#   FAST_MEMPALACE_INSTALL   Install prefix (default: $HOME/.fast-mempalace)
-#   FAST_MEMPALACE_REPO      GitHub repo (default: debpalash/fast-mempalace)
-#   FAST_MEMPALACE_NO_MODEL  Skip GGUF embedding model download (default: 0)
+#   MEMXT_VERSION   Release tag to install (default: latest)
+#   MEMXT_INSTALL   Install prefix (default: $HOME/.memxt)
+#   MEMXT_REPO      GitHub repo (default: Yupcha/memxt)
+#   MEMXT_NO_MODEL  Skip GGUF embedding model download (default: 0)
 
 set -euo pipefail
 
 TMP_DIR=""
 trap '[ -n "$TMP_DIR" ] && rm -rf "$TMP_DIR"' EXIT
 
-REPO="${FAST_MEMPALACE_REPO:-debpalash/fast-mempalace}"
-VERSION="${FAST_MEMPALACE_VERSION:-latest}"
-INSTALL_DIR="${FAST_MEMPALACE_INSTALL:-$HOME/.fast-mempalace}"
+REPO="${MEMXT_REPO:-Yupcha/memxt}"
+VERSION="${MEMXT_VERSION:-latest}"
+INSTALL_DIR="${MEMXT_INSTALL:-$HOME/.memxt}"
 BIN_DIR="$INSTALL_DIR/bin"
 LIB_DIR="$INSTALL_DIR/lib"
 # MiniLM-L6-v2, 384-dim (matches EMBEDDING_DIM and the vec_drawers schema).
@@ -73,21 +73,21 @@ download() {
 
 install_binary() {
   local platform="$1"
-  local tarball="fast-mempalace-${platform}.tar.gz"
+  local tarball="memxt-${platform}.tar.gz"
   local url="https://github.com/$REPO/releases/download/$VERSION/$tarball"
   TMP_DIR=$(mktemp -d)  # global so the EXIT trap can clean it after main returns
 
   mkdir -p "$BIN_DIR"
   download "$url" "$TMP_DIR/$tarball"
   tar -xzf "$TMP_DIR/$tarball" -C "$TMP_DIR"
-  [ -f "$TMP_DIR/fast-mempalace" ] || die "tarball missing 'fast-mempalace' binary"
-  install -m 755 "$TMP_DIR/fast-mempalace" "$BIN_DIR/fast-mempalace"
-  ok "installed $BIN_DIR/fast-mempalace"
+  [ -f "$TMP_DIR/memxt" ] || die "tarball missing 'memxt' binary"
+  install -m 755 "$TMP_DIR/memxt" "$BIN_DIR/memxt"
+  ok "installed $BIN_DIR/memxt"
 }
 
 install_model() {
-  if [ "${FAST_MEMPALACE_NO_MODEL:-0}" = "1" ]; then
-    warn "skipping embedding model download (FAST_MEMPALACE_NO_MODEL=1)"
+  if [ "${MEMXT_NO_MODEL:-0}" = "1" ]; then
+    warn "skipping embedding model download (MEMXT_NO_MODEL=1)"
     return
   fi
   mkdir -p "$LIB_DIR"
@@ -110,7 +110,7 @@ shell_hint() {
   esac
 
   echo
-  printf "%bFast MemPalace installed to%b %s\n" "$C_BOLD" "$C_RESET" "$INSTALL_DIR"
+  printf "%bmemxt installed to%b %s\n" "$C_BOLD" "$C_RESET" "$INSTALL_DIR"
   echo
   printf "%bNext step:%b add to PATH\n\n" "$C_BOLD" "$C_RESET"
   if [ "$shell_name" = "fish" ]; then
@@ -119,10 +119,10 @@ shell_hint() {
     printf "  echo 'export PATH=\"%s:\$PATH\"' >> %s\n" "$BIN_DIR" "$shell_rc"
     printf "  source %s\n\n" "$shell_rc"
   fi
-  printf "%bQuick check:%b\n\n  fast-mempalace stats\n\n" "$C_BOLD" "$C_RESET"
-  printf "%bClaude Code:%b add persistent memory in two lines —\n\n  /plugin marketplace add debpalash/fast-mempalace\n  /plugin install fast-mempalace\n\n" \
+  printf "%bQuick check:%b\n\n  memxt stats\n\n" "$C_BOLD" "$C_RESET"
+  printf "%bClaude Code:%b add persistent memory in two lines —\n\n  /plugin marketplace add Yupcha/memxt\n  /plugin install memxt\n\n" \
     "$C_BOLD" "$C_RESET"
-  printf "%bSeed memory from a repo (optional):%b\n\n  fast-mempalace mine . my-project\n\n" "$C_BOLD" "$C_RESET"
+  printf "%bSeed memory from a repo (optional):%b\n\n  memxt mine . my-project\n\n" "$C_BOLD" "$C_RESET"
   printf "%bDocs:%b https://github.com/%s\n" "$C_DIM" "$C_RESET" "$REPO"
 }
 
