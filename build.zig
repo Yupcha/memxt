@@ -48,8 +48,13 @@ pub fn build(b: *std.Build) void {
 /// rather than via `linkSystemLibrary`, so we never accidentally pick up a
 /// Homebrew dylib and we end up with a genuinely static binary.
 fn configureModule(b: *std.Build, mod: *std.Build.Module, is_macos: bool) void {
-    // SQLite3 (system library) + sqlite-vec (compiled from source).
-    mod.linkSystemLibrary("sqlite3", .{});
+    // SQLite is vendored (amalgamation) and compiled in, not linked from the
+    // system — so the binary is genuinely self-contained (no libsqlite3 dynamic
+    // dep) and cross-compiles cleanly (no system-library lookup for the target).
+    mod.addCSourceFile(.{
+        .file = b.path("lib/sqlite3.c"),
+        .flags = &[_][]const u8{ "-O2", "-DSQLITE_THREADSAFE=1", "-DSQLITE_DQS=0", "-DSQLITE_DEFAULT_MEMSTATUS=0", "-DSQLITE_OMIT_DEPRECATED" },
+    });
     mod.addCSourceFile(.{
         .file = b.path("lib/sqlite-vec.c"),
         .flags = &[_][]const u8{ "-O3", "-fomit-frame-pointer", "-DSQLITE_CORE" },
@@ -77,6 +82,14 @@ fn configureModule(b: *std.Build, mod: *std.Build.Module, is_macos: bool) void {
     mod.linkSystemLibrary("c++", .{});
 
     if (is_macos) {
+        // Make the macOS SDK frameworks/libs discoverable. Native builds detect
+        // these automatically, but cross-compiling (x86_64 on an arm host) does
+        // not, so we add the SDK paths explicitly.
+        if (sdkPath(b)) |sdk| {
+            mod.addFrameworkPath(.{ .cwd_relative = b.fmt("{s}/System/Library/Frameworks", .{sdk}) });
+            mod.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/usr/lib", .{sdk}) });
+        }
+
         // macOS: Metal + Accelerate BLAS backends and the frameworks they need.
         mod.addObjectFile(b.path("lib/llama.cpp/build/ggml/src/ggml-blas/libggml-blas.a"));
         mod.addObjectFile(b.path("lib/llama.cpp/build/ggml/src/ggml-metal/libggml-metal.a"));
@@ -86,4 +99,11 @@ fn configureModule(b: *std.Build, mod: *std.Build.Module, is_macos: bool) void {
         mod.linkFramework("MetalKit", .{});
         mod.linkFramework("Foundation", .{});
     }
+}
+
+/// Resolve the active macOS SDK path via `xcrun`, or null if unavailable.
+fn sdkPath(b: *std.Build) ?[]const u8 {
+    const out = b.run(&.{ "xcrun", "--show-sdk-path" });
+    const trimmed = std.mem.trim(u8, out, " \t\r\n");
+    return if (trimmed.len == 0) null else trimmed;
 }
