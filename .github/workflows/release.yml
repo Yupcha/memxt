@@ -142,6 +142,9 @@ jobs:
   release:
     name: Publish GitHub Release
     needs: build
+    # Publish whatever platforms succeeded even if one leg fails, rather than
+    # skipping the whole release (fail-fast is off on the build matrix).
+    if: ${{ always() && !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
