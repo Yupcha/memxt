@@ -69,7 +69,8 @@ jobs:
       - name: Download Neural Matrix (GGUF)
         run: |
           mkdir -p lib
-          curl -L -o lib/minilm.gguf "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/main/nomic-embed-text-v1.5.f16.gguf"
+          # MiniLM-L6-v2, 384-dim — must match EMBEDDING_DIM and the float[384] schema.
+          curl -L -o lib/minilm.gguf "https://huggingface.co/leliuga/all-MiniLM-L6-v2-GGUF/resolve/main/all-MiniLM-L6-v2.F16.gguf"
 
       - name: Build llama.cpp Static Libraries
         if: steps.cache_llama.outputs.cache-hit != 'true'
@@ -79,9 +80,11 @@ jobs:
               -DCMAKE_BUILD_TYPE=Release \
               -DBUILD_SHARED_LIBS=OFF \
               -DGGML_METAL=ON \
+              -DGGML_BLAS=ON \
               -DLLAMA_BUILD_TESTS=OFF \
               -DLLAMA_BUILD_EXAMPLES=OFF \
-              -DLLAMA_BUILD_SERVER=OFF
+              -DLLAMA_BUILD_SERVER=OFF \
+              -DLLAMA_BUILD_TOOLS=OFF
           else
             # Force clang + libc++ so the ABI matches Zig's bundled libc++.
             CC=clang CXX=clang++ \
@@ -113,7 +116,11 @@ jobs:
       - name: Compile Native Vector Pipelines (ReleaseFast)
         run: zig build --release=fast
 
-      - name: Execute CLI Validation
+      - name: Execute CLI Validation (incl. real embeddings)
         run: |
+          set -eux
           ./zig-out/bin/fast-mempalace init
           ./zig-out/bin/fast-mempalace stats
+          printf 'The deploy key id is QUASAR-77 and must never be logged.\n' > smoke.txt
+          ./zig-out/bin/fast-mempalace mine smoke.txt smoke
+          ./zig-out/bin/fast-mempalace search "what is the deploy key" 2>&1 | grep -q QUASAR-77
