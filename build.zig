@@ -1,5 +1,11 @@
 const std = @import("std");
 
+// Single source of truth for the version: the `.version` field in build.zig.zon.
+// Injected into the binary via a build option (see configureModule) so mcp.zig's
+// `initialize` / serverInfo report exactly what the package declares.
+const build_zon = @import("build.zig.zon");
+const VERSION = build_zon.version;
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -48,6 +54,11 @@ pub fn build(b: *std.Build) void {
 /// rather than via `linkSystemLibrary`, so we never accidentally pick up a
 /// Homebrew dylib and we end up with a genuinely static binary.
 fn configureModule(b: *std.Build, mod: *std.Build.Module, is_macos: bool) void {
+    // Expose the package version to Zig code as `@import("build_options").version`.
+    const options = b.addOptions();
+    options.addOption([]const u8, "version", VERSION);
+    mod.addOptions("build_options", options);
+
     // SQLite is vendored (amalgamation) and compiled in, not linked from the
     // system — so the binary is genuinely self-contained (no libsqlite3 dynamic
     // dep) and cross-compiles cleanly (no system-library lookup for the target).
