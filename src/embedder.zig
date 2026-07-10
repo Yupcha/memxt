@@ -97,6 +97,14 @@ pub const Embedder = struct {
         self.acquire();
         defer self.release();
 
+        // Each embed() is an independent sentence, but the context's KV cache is
+        // shared across calls under sequence 0. Without clearing it, a shorter
+        // input embedded after a longer one leaves stale keys/values at the
+        // trailing positions; this non-causal model attends to every cached
+        // position in the sequence, silently contaminating the embedding. Reset
+        // to a clean slate so every embedding depends only on its own tokens.
+        c.llama_memory_clear(c.llama_get_memory(self.ctx), true);
+
         // ── Tokenize ──
         const tokens = try allocator.alloc(c.llama_token, MAX_TOKENS);
         defer allocator.free(tokens);
@@ -110,8 +118,22 @@ pub const Embedder = struct {
             true, // add_special (BOS/CLS as configured by the model)
             false, // parse_special
         );
-        // Negative return = buffer too small; we intentionally truncate to MAX_TOKENS.
-        if (n < 0) n = MAX_TOKENS;
+        if (n < 0) {
+            // The text is longer than MAX_TOKENS. llama_tokenize signals this by
+            // returning -(full token count) and writes NOTHING into `tokens` —
+            // so we must not just clamp n and feed the buffer, or we'd embed
+            // uninitialized garbage token ids (garbage in ReleaseFast, 0xAA in
+            // Debug → llama_decode fails). Re-tokenize into a big-enough buffer,
+            // then keep the first MAX_TOKENS valid tokens (positions stay ≤511).
+            const needed: usize = @intCast(-n);
+            const full = try allocator.alloc(c.llama_token, needed);
+            defer allocator.free(full);
+            const m = c.llama_tokenize(self.vocab, text.ptr, @intCast(text.len), full.ptr, @intCast(needed), true, false);
+            if (m <= 0) return error.EmptyInput;
+            const keep = @min(MAX_TOKENS, @as(usize, @intCast(m)));
+            @memcpy(tokens[0..keep], full[0..keep]);
+            n = @intCast(keep);
+        }
         if (n == 0) return error.EmptyInput;
         const n_tok: usize = @intCast(n);
 
