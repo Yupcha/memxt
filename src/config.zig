@@ -126,6 +126,55 @@ pub fn applyEnvOverrides(cfg: *Config, allocator: std.mem.Allocator) void {
     overrideZ(&cfg.model_path, "lib/minilm.gguf", "MEMXT_MODEL", allocator);
     overrideZ(&cfg.default_wing, "default", "MEMXT_WING", allocator);
     resolveModelPath(cfg, allocator);
+    resolveDefaultWing(cfg, allocator);
+}
+
+/// If nothing (yaml nor MEMXT_WING) picked a wing, scope the default wing to
+/// the current project instead of dumping every project on the machine into
+/// one shared "default" wing. Prefers the basename of the git repository
+/// root (walking up from cwd looking for a `.git` entry); falls back to the
+/// basename of cwd; falls back to leaving "default" untouched.
+fn resolveDefaultWing(cfg: *Config, allocator: std.mem.Allocator) void {
+    if (!std.mem.eql(u8, cfg.default_wing, "default")) return;
+    if (deriveProjectWing(allocator)) |derived| {
+        cfg.default_wing = derived;
+    }
+}
+
+/// Walk up from cwd looking for a `.git` entry (dir for a normal repo, file
+/// for a worktree/submodule). Returns the sanitized basename of the
+/// directory that contains it, or the sanitized basename of cwd if no git
+/// root is found. Returns null if cwd can't be determined or the derived
+/// name would be empty (caller keeps the "default" fallback).
+fn deriveProjectWing(allocator: std.mem.Allocator) ?[:0]const u8 {
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    const cwd_ptr = c.getcwd(&buf, buf.len) orelse return null;
+    const cwd = std.mem.span(cwd_ptr);
+    if (cwd.len == 0) return null;
+
+    var current: []const u8 = cwd;
+    var depth: usize = 0;
+    while (depth < 64) : (depth += 1) {
+        const git_path = std.fmt.allocPrintSentinel(allocator, "{s}/.git", .{current}, 0) catch break;
+        defer allocator.free(git_path);
+        if (fileExists(git_path)) {
+            return sanitizeWingName(allocator, std.fs.path.basename(current));
+        }
+        const parent = std.fs.path.dirname(current) orelse break;
+        if (std.mem.eql(u8, parent, current)) break;
+        current = parent;
+    }
+
+    // No git root found anywhere above cwd; fall back to cwd's basename.
+    return sanitizeWingName(allocator, std.fs.path.basename(cwd));
+}
+
+/// Trim and validate a candidate wing name, returning a heap-allocated
+/// sentinel-terminated copy. Returns null if the trimmed name is empty.
+fn sanitizeWingName(allocator: std.mem.Allocator, name: []const u8) ?[:0]const u8 {
+    const trimmed = std.mem.trim(u8, name, " \r\t");
+    if (trimmed.len == 0) return null;
+    return allocator.dupeZ(u8, trimmed) catch null;
 }
 
 fn fileExists(path: [:0]const u8) bool {
@@ -169,4 +218,34 @@ fn extractYamlValue(input: []const u8) []const u8 {
         val = val[1 .. val.len - 1];
     }
     return val;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Automated Testing Suite
+// ═══════════════════════════════════════════════════════════════════
+
+test "MEMXT_WING env override wins over derived default" {
+    const allocator = std.testing.allocator;
+    _ = c.setenv("MEMXT_WING", "explicit-wing", 1);
+    defer _ = c.unsetenv("MEMXT_WING");
+
+    var cfg = Config{};
+    applyEnvOverrides(&cfg, allocator);
+    defer cfg.deinit(allocator);
+
+    try std.testing.expectEqualStrings("explicit-wing", cfg.default_wing);
+}
+
+test "default wing derives from project when nothing is configured" {
+    const allocator = std.testing.allocator;
+    _ = c.unsetenv("MEMXT_WING");
+
+    var cfg = Config{};
+    applyEnvOverrides(&cfg, allocator);
+    defer cfg.deinit(allocator);
+
+    // `zig build test` runs with cwd inside this git checkout, so the
+    // derived wing should be scoped to the project rather than staying the
+    // generic "default" literal shared by every project on the machine.
+    try std.testing.expect(!std.mem.eql(u8, cfg.default_wing, "default"));
 }

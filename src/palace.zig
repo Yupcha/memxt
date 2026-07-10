@@ -303,6 +303,31 @@ pub const Palace = struct {
         return results.toOwnedSlice(allocator);
     }
 
+    /// Delete a single drawer and its vector-table row. The vec row must go too,
+    /// otherwise `search` keeps returning a dangling hit whose JOIN to `drawers`
+    /// yields nothing. Returns true if a drawer row was actually removed.
+    pub fn deleteDrawer(self: *Palace, drawer_id: i64) !bool {
+        // Serialize against the miner's insert sequence — both touch drawers +
+        // vec_drawers and must not interleave.
+        lockWrites();
+        defer unlockWrites();
+
+        // Drop the vector row first (no FK cascade reaches the virtual table).
+        {
+            const vec_stmt = self.database.prepare("DELETE FROM vec_drawers WHERE id = ?") orelse return error.PrepareFailed;
+            defer db.finalize(vec_stmt);
+            db.bindInt64(vec_stmt, 1, drawer_id);
+            _ = db.step(vec_stmt);
+        }
+
+        const stmt = self.database.prepare("DELETE FROM drawers WHERE id = ?") orelse return error.PrepareFailed;
+        defer db.finalize(stmt);
+        db.bindInt64(stmt, 1, drawer_id);
+        if (db.step(stmt) != db.c.SQLITE_DONE) return error.DeleteFailed;
+
+        return self.database.changes() > 0;
+    }
+
     /// Count total drawers in the palace
     pub fn drawerCount(self: *Palace) i64 {
         const stmt = self.database.prepare("SELECT COUNT(*) FROM drawers") orelse return 0;

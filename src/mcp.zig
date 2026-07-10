@@ -2,17 +2,22 @@
 // memxt/mcp.zig — Model Context Protocol server (stdio JSON-RPC)
 //
 // Exposes the memory palace to any MCP-capable agent (Claude Code, Cursor,
-// Zed, …) over newline-delimited JSON-RPC on stdin/stdout. Four real tools:
+// Zed, …) over newline-delimited JSON-RPC on stdin/stdout. Five real tools:
 //
 //   memory_search   — semantic recall across everything mined/stored
 //   memory_store    — persist a decision / snippet / fact as a memory
+//   memory_forget   — delete a memory by its drawer id
 //   memory_wake_up  — load the compact session-start context
 //   memory_stats    — palace statistics
+//
+// Plus two prompts (remember / recall) and one resource (the wake-up brief),
+// so the slash commands are portable to any MCP client, not just Claude Code.
 //
 // All work happens locally; nothing leaves the machine.
 // ═══════════════════════════════════════════════════════════════════
 
 const std = @import("std");
+const build_options = @import("build_options");
 const config = @import("config.zig");
 const db = @import("db.zig");
 const palace = @import("palace.zig");
@@ -69,9 +74,64 @@ const TOOLS_LIST =
     \\      }
     \\    },
     \\    {
+    \\      "name": "memory_forget",
+    \\      "description": "Delete a stored memory by its drawer id (the `id` field returned by memory_search). Removes both the content and its vector embedding so it can never surface again. Use when a memory is wrong, stale, or should not be retained.",
+    \\      "inputSchema": {
+    \\        "type": "object",
+    \\        "properties": {
+    \\          "id": { "type": "integer", "description": "The drawer id to forget (from a memory_search result)." }
+    \\        },
+    \\        "required": ["id"]
+    \\      }
+    \\    },
+    \\    {
     \\      "name": "memory_stats",
     \\      "description": "Report palace statistics: how many wings, rooms, drawers, and entities are stored.",
     \\      "inputSchema": { "type": "object", "properties": {} }
+    \\    }
+    \\  ]
+    \\}
+;
+
+// ── Prompts (portable /remember and /recall) ──
+//
+// Advertised via the `prompts` capability and served by prompts/list +
+// prompts/get. The wording mirrors claude-plugin/commands/{remember,recall}.md
+// so the slash commands behave identically on any MCP client.
+
+const PROMPTS_LIST =
+    \\{
+    \\  "prompts": [
+    \\    {
+    \\      "name": "remember",
+    \\      "description": "Save something to long-term local memory",
+    \\      "arguments": [
+    \\        { "name": "content", "description": "The text to remember (verbatim).", "required": true }
+    \\      ]
+    \\    },
+    \\    {
+    \\      "name": "recall",
+    \\      "description": "Search long-term local memory and answer from it",
+    \\      "arguments": [
+    \\        { "name": "query", "description": "What to recall, in natural language.", "required": true }
+    \\      ]
+    \\    }
+    \\  ]
+    \\}
+;
+
+// ── Resources (the wake-up brief as an attachable resource) ──
+
+const WAKEUP_URI = "memxt://wakeup";
+
+const RESOURCES_LIST =
+    \\{
+    \\  "resources": [
+    \\    {
+    \\      "uri": "memxt://wakeup",
+    \\      "name": "Memory wake-up brief",
+    \\      "description": "Compact session-start context: identity + most relevant recent memories (~600-900 tokens).",
+    \\      "mimeType": "text/plain"
     \\    }
     \\  ]
     \\}
@@ -143,8 +203,8 @@ fn handleLine(
             }
         }
         const info = try std.fmt.allocPrint(allocator,
-            \\{{"protocolVersion":"{s}","capabilities":{{"tools":{{}}}},"serverInfo":{{"name":"memxt","version":"0.2.0"}}}}
-        , .{version});
+            \\{{"protocolVersion":"{s}","capabilities":{{"tools":{{}},"prompts":{{}},"resources":{{}}}},"serverInfo":{{"name":"memxt","version":"{s}"}}}}
+        , .{ version, build_options.version });
         defer allocator.free(info);
         try sendRawResult(allocator, io, id, info);
     } else if (std.mem.eql(u8, method, "notifications/initialized")) {
@@ -154,14 +214,35 @@ fn handleLine(
     } else if (std.mem.eql(u8, method, "tools/list")) {
         try sendRawResult(allocator, io, id, TOOLS_LIST);
     } else if (std.mem.eql(u8, method, "tools/call")) {
-        const text = dispatchTool(allocator, pal, database, cfg, io, req.params) catch |err|
-            try std.fmt.allocPrint(allocator, "Error: {s}", .{@errorName(err)});
-        defer allocator.free(text);
-        try sendToolText(allocator, io, id, text);
+        var result = dispatchTool(allocator, pal, database, cfg, io, req.params) catch |err|
+            ToolResult{ .text = try std.fmt.allocPrint(allocator, "Error: {s}", .{@errorName(err)}) };
+        defer result.deinit(allocator);
+        try sendToolResult(allocator, io, id, result);
+    } else if (std.mem.eql(u8, method, "prompts/list")) {
+        try sendRawResult(allocator, io, id, PROMPTS_LIST);
+    } else if (std.mem.eql(u8, method, "prompts/get")) {
+        try handlePromptGet(allocator, io, id, req.params);
+    } else if (std.mem.eql(u8, method, "resources/list")) {
+        try sendRawResult(allocator, io, id, RESOURCES_LIST);
+    } else if (std.mem.eql(u8, method, "resources/read")) {
+        try handleResourceRead(allocator, database, io, id, req.params);
     } else {
         try sendError(allocator, io, id, -32601, "method not found");
     }
 }
+
+// A tool result: always a human-readable `text` block (backward-compatible with
+// the Claude Code plugin, which only reads text), plus an OPTIONAL `structured`
+// JSON string embedded as MCP `structuredContent` for clients that can consume it.
+const ToolResult = struct {
+    text: []u8,
+    structured: ?[]u8 = null,
+
+    fn deinit(self: *ToolResult, allocator: Allocator) void {
+        allocator.free(self.text);
+        if (self.structured) |s| allocator.free(s);
+    }
+};
 
 fn dispatchTool(
     allocator: Allocator,
@@ -170,7 +251,7 @@ fn dispatchTool(
     cfg: *const config.Config,
     io: std.Io,
     params: ?std.json.Value,
-) ![]u8 {
+) !ToolResult {
     const p = params orelse return error.MissingParams;
     if (p != .object) return error.MissingParams;
     // Type-check rather than blindly accessing `.string`: a non-string `name`
@@ -199,18 +280,28 @@ fn dispatchTool(
         const wing = getStr(args, "wing") orelse cfg.default_wing;
         const room = getStr(args, "room") orelse "notes";
         const id = try miner.storeMemory(pal, content, wing, room, "agent", allocator);
-        return std.fmt.allocPrint(allocator, "Stored memory #{d} in {s}/{s}.", .{ id, wing, room });
+        return .{ .text = try std.fmt.allocPrint(allocator, "Stored memory #{d} in {s}/{s}.", .{ id, wing, room }) };
+    } else if (std.mem.eql(u8, name, "memory_forget")) {
+        // The id is required; accept an out-of-range value gracefully (it simply
+        // matches nothing) rather than treating it as UB.
+        const fid = getInt(args, "id") orelse return error.MissingId;
+        const removed = try pal.deleteDrawer(fid);
+        const text = if (removed)
+            try std.fmt.allocPrint(allocator, "Forgot memory #{d}.", .{fid})
+        else
+            try std.fmt.allocPrint(allocator, "No memory #{d} found to forget.", .{fid});
+        return .{ .text = text };
     } else if (std.mem.eql(u8, name, "memory_wake_up")) {
         const wing = getStr(args, "wing");
-        return wakeup.generate(database, wing, allocator);
+        return .{ .text = try wakeup.generate(database, wing, allocator) };
     } else if (std.mem.eql(u8, name, "memory_stats")) {
-        return pal.stats(allocator);
+        return .{ .text = try pal.stats(allocator) };
     }
-    return std.fmt.allocPrint(allocator, "Unknown tool: {s}", .{name});
+    return .{ .text = try std.fmt.allocPrint(allocator, "Unknown tool: {s}", .{name}) };
 }
 
-fn toolSearch(allocator: Allocator, pal: *palace.Palace, io: std.Io, query: []const u8, limit: i32) ![]u8 {
-    if (!embedder.isReady()) return allocator.dupe(u8, "Memory model not loaded; semantic search unavailable.");
+fn toolSearch(allocator: Allocator, pal: *palace.Palace, io: std.Io, query: []const u8, limit: i32) !ToolResult {
+    if (!embedder.isReady()) return .{ .text = try allocator.dupe(u8, "Memory model not loaded; semantic search unavailable.") };
 
     const q_vec = try embedder.embed(query, allocator);
     defer allocator.free(q_vec);
@@ -226,8 +317,9 @@ fn toolSearch(allocator: Allocator, pal: *palace.Palace, io: std.Io, query: []co
         allocator.free(results);
     }
 
-    if (results.len == 0) return allocator.dupe(u8, "No relevant memories found.");
+    if (results.len == 0) return .{ .text = try allocator.dupe(u8, "No relevant memories found.") };
 
+    // ── Human-readable text block (unchanged shape for the Claude Code plugin) ──
     var out: std.ArrayListUnmanaged(u8) = .empty;
     errdefer out.deinit(allocator);
 
@@ -238,13 +330,130 @@ fn toolSearch(allocator: Allocator, pal: *palace.Palace, io: std.Io, query: []co
     try out.appendSlice(allocator, header);
 
     for (results, 0..) |r, i| {
-        const block = try std.fmt.allocPrint(allocator, "{d}. [{s}/{s}] {s}\n{s}\n\n", .{
-            i + 1, r.wing_name, r.room_name, r.source_path, r.content,
+        const block = try std.fmt.allocPrint(allocator, "{d}. [#{d} {s}/{s}] {s}\n{s}\n\n", .{
+            i + 1, r.drawer_id, r.wing_name, r.room_name, r.source_path, r.content,
         });
         defer allocator.free(block);
         try out.appendSlice(allocator, block);
     }
-    return out.toOwnedSlice(allocator);
+
+    // ── Structured content: {"results":[{id,wing,room,source,score,content}]} ──
+    // Each hit carries the stable drawer id (usable directly with memory_forget)
+    // plus metadata. Built as a slice of structs borrowing `results`' memory,
+    // which is valid until the deferred free above runs.
+    const Hit = struct {
+        id: i64,
+        wing: []const u8,
+        room: []const u8,
+        source: []const u8,
+        score: f64,
+        content: []const u8,
+    };
+    const hits = try allocator.alloc(Hit, results.len);
+    defer allocator.free(hits);
+    for (results, 0..) |r, i| {
+        hits[i] = .{
+            .id = r.drawer_id,
+            .wing = r.wing_name,
+            .room = r.room_name,
+            .source = r.source_path,
+            .score = r.score,
+            .content = r.content,
+        };
+    }
+    const structured = try std.json.Stringify.valueAlloc(allocator, .{ .results = hits }, .{});
+    errdefer allocator.free(structured);
+
+    return .{ .text = try out.toOwnedSlice(allocator), .structured = structured };
+}
+
+// ── Prompts: prompts/get ──
+
+fn handlePromptGet(allocator: Allocator, io: std.Io, id: std.json.Value, params: ?std.json.Value) !void {
+    const p = params orelse return sendError(allocator, io, id, -32602, "missing params");
+    if (p != .object) return sendError(allocator, io, id, -32602, "missing params");
+    const name = switch (p.object.get("name") orelse return sendError(allocator, io, id, -32602, "missing prompt name")) {
+        .string => |s| s,
+        else => return sendError(allocator, io, id, -32602, "missing prompt name"),
+    };
+    const args: ?std.json.Value = p.object.get("arguments");
+
+    // Build the user-message text, mirroring the plugin command wording. Any
+    // interpolation is escaped safely because the whole result is stringified.
+    var description: []const u8 = undefined;
+    var text: []u8 = undefined;
+    if (std.mem.eql(u8, name, "remember")) {
+        const content = getStr(args, "content") orelse "";
+        description = "Save something to long-term local memory";
+        text = try std.fmt.allocPrint(allocator,
+            \\Store the following in long-term memory using the `memory_store` tool, kept verbatim
+            \\and concise. If it spans multiple distinct facts, store each as its own memory.
+            \\
+            \\What to remember:
+            \\
+            \\{s}
+            \\
+            \\If no text was given, summarize the most important decision or fact from the current
+            \\conversation and store that instead. Confirm what you stored in one line.
+        , .{content});
+    } else if (std.mem.eql(u8, name, "recall")) {
+        const query = getStr(args, "query") orelse "";
+        description = "Search long-term local memory and answer from it";
+        text = try std.fmt.allocPrint(allocator,
+            \\Use the `memory_search` tool to recall everything relevant to the query below, then
+            \\answer using what you find. Cite the source of each memory you rely on. If memory has
+            \\nothing relevant, say so plainly rather than guessing.
+            \\
+            \\Query:
+            \\
+            \\{s}
+        , .{query});
+    } else {
+        return sendError(allocator, io, id, -32602, "unknown prompt");
+    }
+    defer allocator.free(text);
+
+    const out = try std.json.Stringify.valueAlloc(allocator, .{
+        .jsonrpc = "2.0",
+        .id = id,
+        .result = .{
+            .description = description,
+            .messages = .{
+                .{ .role = "user", .content = .{ .@"type" = "text", .text = text } },
+            },
+        },
+    }, .{});
+    defer allocator.free(out);
+    writeLine(io, out);
+}
+
+// ── Resources: resources/read ──
+
+fn handleResourceRead(allocator: Allocator, database: *db.Database, io: std.Io, id: std.json.Value, params: ?std.json.Value) !void {
+    const p = params orelse return sendError(allocator, io, id, -32602, "missing params");
+    if (p != .object) return sendError(allocator, io, id, -32602, "missing params");
+    const uri = switch (p.object.get("uri") orelse return sendError(allocator, io, id, -32602, "missing uri")) {
+        .string => |s| s,
+        else => return sendError(allocator, io, id, -32602, "missing uri"),
+    };
+    if (!std.mem.eql(u8, uri, WAKEUP_URI)) {
+        return sendError(allocator, io, id, -32602, "unknown resource uri");
+    }
+
+    const brief = try wakeup.generate(database, null, allocator);
+    defer allocator.free(brief);
+
+    const out = try std.json.Stringify.valueAlloc(allocator, .{
+        .jsonrpc = "2.0",
+        .id = id,
+        .result = .{
+            .contents = .{
+                .{ .uri = WAKEUP_URI, .mimeType = "text/plain", .text = brief },
+            },
+        },
+    }, .{});
+    defer allocator.free(out);
+    writeLine(io, out);
 }
 
 // ── JSON-RPC output helpers ──
@@ -262,6 +471,35 @@ fn sendRawResult(allocator: Allocator, io: std.Io, id: std.json.Value, raw_resul
     }, .{});
     defer allocator.free(out);
     writeLine(io, out);
+}
+
+/// Send a tools/call result: always the plain-text content envelope, plus an
+/// embedded `structuredContent` object when the tool produced one.
+fn sendToolResult(allocator: Allocator, io: std.Io, id: std.json.Value, result: ToolResult) !void {
+    if (result.structured) |s| {
+        // Embed the pre-serialized JSON as a parsed value so it nests as a real
+        // object rather than a quoted string. Fall back to text-only on any
+        // parse hiccup so a client still gets a valid response.
+        var parsed = std.json.parseFromSlice(std.json.Value, allocator, s, .{}) catch {
+            return sendToolText(allocator, io, id, result.text);
+        };
+        defer parsed.deinit();
+        const out = try std.json.Stringify.valueAlloc(allocator, .{
+            .jsonrpc = "2.0",
+            .id = id,
+            .result = .{
+                .content = .{
+                    .{ .@"type" = "text", .text = result.text },
+                },
+                .structuredContent = parsed.value,
+                .isError = false,
+            },
+        }, .{});
+        defer allocator.free(out);
+        writeLine(io, out);
+        return;
+    }
+    try sendToolText(allocator, io, id, result.text);
 }
 
 /// Send a tools/call result wrapping plain text in the MCP content envelope.

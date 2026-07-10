@@ -42,6 +42,10 @@ pub const Database = struct {
 
         // Performance tuning
         self.exec("PRAGMA journal_mode=WAL");
+        // Multiple harnesses may point at the same palace.db concurrently. Without
+        // a busy timeout a concurrent write returns SQLITE_BUSY immediately and we
+        // silently drop the memory; wait up to 5s for the lock instead.
+        self.exec("PRAGMA busy_timeout=5000");
         self.exec("PRAGMA synchronous=NORMAL");
         self.exec("PRAGMA cache_size=-16000"); // 16MB cache
         self.exec("PRAGMA temp_store=MEMORY");

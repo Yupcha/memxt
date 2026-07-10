@@ -14,6 +14,10 @@ const mcp = @import("mcp.zig");
 const wakeup = @import("wakeup.zig");
 const hooks = @import("hooks.zig");
 
+const c_env = @cImport({
+    @cInclude("stdlib.h");
+});
+
 /// Zig 0.16 "Juicy Main" — receives allocator, args, IO from the runtime.
 pub fn main(init: std.process.Init) !void {
     const allocator = init.gpa;
@@ -76,7 +80,7 @@ pub fn main(init: std.process.Init) !void {
             va.len, va[0], va[1], va[2], vb[0], vb[1], vb[2], dot,
         });
     } else if (std.mem.eql(u8, command, "instructions")) {
-        cmdInstructions();
+        try cmdInstructions(&args_it, allocator);
     } else if (std.mem.eql(u8, command, "mcp")) {
         // The model loads lazily on the first semantic search (see mcp.zig), so
         // `initialize` answers instantly and the client never times us out
@@ -103,7 +107,8 @@ fn printUsage() void {
         \\    memxt kg [subject]          Query knowledge graph
         \\    memxt wake-up [--wing X]    Show L0+L1 wake-up context
         \\    memxt hook                  Run hook (JSON stdin/stdout)
-        \\    memxt instructions          Output skill instructions
+        \\    memxt instructions [--harness <claude|codex|cursor|zed|generic>]
+        \\                                 Output setup instructions for an AI harness
         \\    memxt mcp                   Start MCP JSON-RPC server
         \\
     , .{});
@@ -263,7 +268,68 @@ fn cmdHook(cfg: *const config.Config, allocator: std.mem.Allocator) !void {
     try hooks.processHook(&database, cfg, allocator);
 }
 
-fn cmdInstructions() void {
+const Harness = enum {
+    claude,
+    codex,
+    cursor,
+    zed,
+    generic,
+
+    fn parse(name: []const u8) ?Harness {
+        if (std.mem.eql(u8, name, "claude")) return .claude;
+        if (std.mem.eql(u8, name, "codex")) return .codex;
+        if (std.mem.eql(u8, name, "cursor")) return .cursor;
+        if (std.mem.eql(u8, name, "zed")) return .zed;
+        if (std.mem.eql(u8, name, "generic")) return .generic;
+        return null;
+    }
+};
+
+/// Resolve `$HOME` at runtime (Codex's TOML and some other harnesses don't
+/// expand `${HOME}` themselves, so we bake in the real absolute path). Falls
+/// back to the literal string "$HOME" if the environment variable is unset.
+fn resolvedHome(allocator: std.mem.Allocator) ![]const u8 {
+    if (c_env.getenv("HOME")) |home_ptr| {
+        return try allocator.dupe(u8, std.mem.span(home_ptr));
+    }
+    return try allocator.dupe(u8, "$HOME");
+}
+
+fn cmdInstructions(args_it: *std.process.Args.Iterator, allocator: std.mem.Allocator) !void {
+    var harness: Harness = .generic;
+
+    if (args_it.next()) |flag| {
+        if (std.mem.eql(u8, flag, "--harness")) {
+            const name = args_it.next() orelse {
+                std.debug.print("Usage: memxt instructions [--harness <claude|codex|cursor|zed|generic>]\n", .{});
+                std.process.exit(1);
+            };
+            harness = Harness.parse(name) orelse {
+                std.debug.print(
+                    "Unknown harness '{s}'. Valid values: claude, codex, cursor, zed, generic\n",
+                    .{name},
+                );
+                std.process.exit(1);
+            };
+        } else {
+            std.debug.print(
+                "Unknown flag '{s}'. Usage: memxt instructions [--harness <claude|codex|cursor|zed|generic>]\n",
+                .{flag},
+            );
+            std.process.exit(1);
+        }
+    }
+
+    switch (harness) {
+        .generic => printGenericInstructions(),
+        .claude => printClaudeInstructions(),
+        .codex => try printCodexInstructions(allocator),
+        .cursor => try printCursorInstructions(allocator),
+        .zed => try printZedInstructions(allocator),
+    }
+}
+
+fn printGenericInstructions() void {
     const instructions =
         \\# memxt — Memory Instructions
         \\
@@ -289,8 +355,184 @@ fn cmdInstructions() void {
         \\
         \\Nothing leaves the local machine. No API keys required.
         \\
+        \\Using a different harness (Codex, Cursor, Zed)? Run
+        \\`memxt instructions --harness <claude|codex|cursor|zed>` for copy-pasteable
+        \\setup, or see docs/harnesses.md.
+        \\
     ;
     std.debug.print("{s}", .{instructions});
+}
+
+fn printClaudeInstructions() void {
+    const instructions =
+        \\# memxt — Claude Code Setup
+        \\
+        \\Claude Code gets the full experience via the bundled plugin — MCP tools,
+        \\session hooks, a skill, and slash commands — with zero manual wiring:
+        \\
+        \\  /plugin marketplace add Yupcha/memxt
+        \\  /plugin install memxt
+        \\
+        \\That's it. This installs:
+        \\  - `memory_search`, `memory_store`, `memory_wake_up`, `memory_stats` (MCP)
+        \\  - A SessionStart hook that auto-injects the wake-up brief every session
+        \\  - A PreCompact hook that saves the conversation tail before it's compacted
+        \\  - `/remember` and `/recall` slash commands
+        \\  - The `using-memory` skill, so Claude knows when to recall/store
+        \\
+        \\Optionally seed memory from a codebase:
+        \\
+        \\  ~/.memxt/bin/memxt mine . my-project
+        \\
+        \\See docs/harnesses.md for details on other harnesses.
+        \\
+    ;
+    std.debug.print("{s}", .{instructions});
+}
+
+fn printCodexInstructions(allocator: std.mem.Allocator) !void {
+    const home = try resolvedHome(allocator);
+    defer allocator.free(home);
+
+    std.debug.print(
+        \\# memxt — OpenAI Codex CLI Setup
+        \\
+        \\Codex has no built-in memory hooks, so two things are needed: standing
+        \\instructions telling the agent WHEN to use memory, and an MCP server entry
+        \\telling Codex HOW to reach it.
+        \\
+        \\## 1. Standing instructions — add to AGENTS.md (project or ~/.codex/AGENTS.md)
+        \\
+        \\```markdown
+        \\## Memory (memxt)
+        \\
+        \\You have a persistent, local memory palace via the `memory` MCP server. It
+        \\survives across sessions and never leaves this machine. Four tools:
+        \\
+        \\- `memory_wake_up` — call this at the start of every session to load the
+        \\  compact continuity brief. Codex does not auto-inject it like Claude Code
+        \\  does, so you must call it yourself.
+        \\- `memory_search` — semantic recall. Call this *before* answering any
+        \\  question about prior work, past decisions, project conventions, or "how
+        \\  did we do X". Don't assume you don't know — check memory first.
+        \\- `memory_store` — persist something worth remembering: a decision and its
+        \\  rationale, a non-obvious constraint, a key snippet, a fact about the user
+        \\  or project. Store it verbatim and concise.
+        \\- `memory_stats` — how much is stored.
+        \\
+        \\Recall before you answer anything about past decisions or conventions. After
+        \\a real decision or a correction, store it as one crisp memory.
+        \\```
+        \\
+        \\## 2. MCP server — add to ~/.codex/config.toml
+        \\
+        \\Codex's TOML config does not expand `$HOME`/`${{HOME}}`, so the path below is
+        \\already resolved to your actual home directory:
+        \\
+        \\```toml
+        \\[mcp_servers.memory]
+        \\command = "{s}/.memxt/bin/memxt"
+        \\args = ["mcp"]
+        \\env = {{ MEMXT_DB = "{s}/.memxt/palace.db", MEMXT_MODEL = "{s}/.memxt/lib/minilm.gguf" }}
+        \\```
+        \\
+        \\Restart Codex after editing config.toml. Nothing leaves the local machine.
+        \\
+    , .{ home, home, home });
+}
+
+fn printCursorInstructions(allocator: std.mem.Allocator) !void {
+    const home = try resolvedHome(allocator);
+    defer allocator.free(home);
+
+    std.debug.print(
+        \\# memxt — Cursor Setup
+        \\
+        \\## 1. MCP server — create .cursor/mcp.json (project) or ~/.cursor/mcp.json (global)
+        \\
+        \\```json
+        \\{{
+        \\  "mcpServers": {{
+        \\    "memory": {{
+        \\      "command": "{s}/.memxt/bin/memxt",
+        \\      "args": ["mcp"],
+        \\      "env": {{
+        \\        "MEMXT_DB": "{s}/.memxt/palace.db",
+        \\        "MEMXT_MODEL": "{s}/.memxt/lib/minilm.gguf"
+        \\      }}
+        \\    }}
+        \\  }}
+        \\}}
+        \\```
+        \\
+        \\(The absolute path above is resolved to your actual home directory — Cursor's
+        \\`${{HOME}}` expansion support varies by version, so this is the safe form.)
+        \\
+        \\## 2. Standing instructions — add to .cursorrules or a Project Rule
+        \\
+        \\```markdown
+        \\## Memory (memxt)
+        \\
+        \\You have a persistent, local memory palace via the `memory` MCP server. It
+        \\survives across sessions and never leaves this machine.
+        \\
+        \\- `memory_wake_up` — call at the start of a session to load the compact
+        \\  continuity brief. Cursor does not auto-inject it, so call it yourself.
+        \\- `memory_search` — semantic recall; call BEFORE answering about prior work,
+        \\  past decisions, or project conventions.
+        \\- `memory_store` — persist a decision, constraint, or snippet, verbatim.
+        \\- `memory_stats` — palace statistics.
+        \\```
+        \\
+        \\Reload the MCP servers list in Cursor's settings after adding the file.
+        \\
+    , .{ home, home, home });
+}
+
+fn printZedInstructions(allocator: std.mem.Allocator) !void {
+    const home = try resolvedHome(allocator);
+    defer allocator.free(home);
+
+    std.debug.print(
+        \\# memxt — Zed Setup
+        \\
+        \\## 1. MCP server — add to settings.json (Zed: Open Settings)
+        \\
+        \\```json
+        \\{{
+        \\  "context_servers": {{
+        \\    "memory": {{
+        \\      "source": "custom",
+        \\      "command": {{
+        \\        "path": "{s}/.memxt/bin/memxt",
+        \\        "args": ["mcp"],
+        \\        "env": {{
+        \\          "MEMXT_DB": "{s}/.memxt/palace.db",
+        \\          "MEMXT_MODEL": "{s}/.memxt/lib/minilm.gguf"
+        \\        }}
+        \\      }}
+        \\    }}
+        \\  }}
+        \\}}
+        \\```
+        \\
+        \\## 2. Standing instructions — add to your Zed rules (Assistant Panel → Rules)
+        \\
+        \\```markdown
+        \\## Memory (memxt)
+        \\
+        \\You have a persistent, local memory palace via the `memory` MCP server. It
+        \\survives across sessions and never leaves this machine.
+        \\
+        \\- `memory_wake_up` — call at the start of a thread to load the compact
+        \\  continuity brief. Zed does not auto-inject it, so call it yourself.
+        \\- `memory_search` — semantic recall; call BEFORE answering about prior work,
+        \\  past decisions, or project conventions.
+        \\- `memory_store` — persist a decision, constraint, or snippet, verbatim.
+        \\- `memory_stats` — palace statistics.
+        \\```
+        \\
+    , .{ home, home, home });
 }
 
 // ═══════════════════════════════════════════════════════════════════
