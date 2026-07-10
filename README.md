@@ -55,8 +55,18 @@ Optionally seed memory from a codebase:
 ~/.memxt/bin/memxt mine . my-project
 ```
 
-> Works with any MCP client (Cursor, Zed, Windsurf, …) too — point it at
-> `memxt mcp`.
+## 🧭 Use with other agents (Codex, Cursor, Zed)
+
+memxt is plain MCP over stdio, so any MCP client can use it — you just don't get
+Claude Code's auto-injecting hooks, so the agent needs to be told to call
+`memory_wake_up` itself. Get copy-pasteable config + standing instructions with:
+
+```bash
+~/.memxt/bin/memxt instructions --harness codex   # or: cursor | zed | claude
+```
+
+Full walkthroughs (exact `config.toml` / `mcp.json` / `settings.json` snippets) →
+[`docs/harnesses.md`](./docs/harnesses.md).
 
 ## 🧩 How it works
 
@@ -97,6 +107,8 @@ memxt stats                 Palace statistics
 memxt mcp                   Start the MCP server (stdio JSON-RPC)
 memxt hook                  Run a Claude Code hook (JSON stdin/stdout)
 memxt kg [subject]          Query the knowledge graph
+memxt instructions [--harness claude|codex|cursor|zed]
+                             Print setup instructions for an AI harness
 ```
 
 ## ⚙️ Configuration
