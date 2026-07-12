@@ -138,8 +138,11 @@ jobs:
           ./zig-out/bin/memxt stats
           # Validate the full semantic path: mine a file, then recall it.
           printf 'The deploy key id is QUASAR-77 and must never be logged.\n' > smoke.txt
+          # Mine into an explicit wing; project-derived default wing is the git
+          # repo name (memxt), so search must pass --wing or it will miss.
           ./zig-out/bin/memxt mine smoke.txt smoke
-          ./zig-out/bin/memxt search "what is the deploy key" 2>&1 | grep -q QUASAR-77
+          ./zig-out/bin/memxt search "what is the deploy key" --wing smoke 2>&1 | tee /tmp/memxt-search.out
+          grep -q QUASAR-77 /tmp/memxt-search.out
 
       - name: Package tarball
         env:

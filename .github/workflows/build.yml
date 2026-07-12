@@ -123,7 +123,8 @@ jobs:
           ./zig-out/bin/memxt stats
           printf 'The deploy key id is QUASAR-77 and must never be logged.\n' > smoke.txt
           ./zig-out/bin/memxt mine smoke.txt smoke
-          ./zig-out/bin/memxt search "what is the deploy key" 2>&1 | grep -q QUASAR-77
+          ./zig-out/bin/memxt search "what is the deploy key" --wing smoke 2>&1 | tee /tmp/memxt-search.out
+          grep -q QUASAR-77 /tmp/memxt-search.out
 
       - name: Integration tests (mine / ranking / MCP / hooks / schema)
         run: bash scripts/integration-test.sh ./zig-out/bin/memxt
