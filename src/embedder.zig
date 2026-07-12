@@ -17,6 +17,12 @@ const c = @cImport({
     @cInclude("llama.h");
 });
 
+/// libc bits used only to locate the installed model in tests.
+const libc = @cImport({
+    @cInclude("stdlib.h");
+    @cInclude("unistd.h");
+});
+
 // MiniLM-L6-v2 embedding width. The vec_drawers virtual table is declared
 // float[384], so the active model MUST match this. Validated in init().
 pub const EMBEDDING_DIM = 384;
@@ -193,6 +199,41 @@ var global_emb: ?Embedder = null;
 /// Points at config/env memory — not freed here.
 var pending_model_path: ?[:0]const u8 = null;
 
+/// `global_emb` is a by-value `?Embedder`, so *assigning* it rewrites the
+/// struct in place — including `lock_flag`, the very spinlock `embed()` uses to
+/// serialize the llama_context. Lazy-init therefore MUST be serialized itself:
+/// the miner calls `embed()` from one concurrent task per file, and an
+/// unguarded `if (global_emb == null) global_emb = init()` let every task see
+/// null, build its own Embedder, and overwrite the global underneath the
+/// others. In-flight calls had their `ctx` swapped mid-encode and their lock
+/// reset, which surfaced as a storm of EncodeFailed/NoEmbedding and silently
+/// dropped ~90% of chunks when mining a directory (single-file mining has one
+/// task, so it never raced and always looked fine).
+///
+/// `emb_ready` is the atomic publication flag — `global_emb` itself is a wide
+/// struct and can't be loaded atomically. Once published, `global_emb` is never
+/// reassigned until `deinitGlobal`, so `&global_emb.?` stays stable.
+var emb_ready: std.atomic.Value(bool) = .init(false);
+var init_lock: std.atomic.Value(bool) = .init(false);
+
+/// Initialize the process-global embedder exactly once. Safe to call from many
+/// threads concurrently; losers of the race wait and observe the winner's.
+fn initGlobalOnce(model_path: [:0]const u8) !void {
+    if (emb_ready.load(.acquire)) return;
+
+    while (init_lock.cmpxchgWeak(false, true, .acquire, .monotonic) != null) {
+        std.atomic.spinLoopHint();
+    }
+    defer init_lock.store(false, .release);
+
+    // Double-check under the lock: another thread may have published while we
+    // were spinning.
+    if (emb_ready.load(.acquire)) return;
+
+    global_emb = try Embedder.init(model_path);
+    emb_ready.store(true, .release);
+}
+
 /// Remember where the model lives without loading it. Mine can then skip the
 /// ~0.5s Metal init entirely when every chunk is already stored (incremental).
 pub fn setModelPath(model_path: [:0]const u8) void {
@@ -200,9 +241,8 @@ pub fn setModelPath(model_path: [:0]const u8) void {
 }
 
 pub fn initGlobal(model_path: [:0]const u8) !void {
-    if (global_emb != null) return;
     pending_model_path = model_path;
-    global_emb = try Embedder.init(model_path);
+    try initGlobalOnce(model_path);
 }
 
 pub fn deinitGlobal() void {
@@ -210,19 +250,20 @@ pub fn deinitGlobal() void {
         global_emb.?.deinit();
         global_emb = null;
     }
+    emb_ready.store(false, .release);
     pending_model_path = null;
 }
 
 /// True once a model is loaded. Lets callers degrade gracefully (e.g. keyword
 /// search) instead of hard-failing when no model is configured.
 pub fn isReady() bool {
-    return global_emb != null;
+    return emb_ready.load(.acquire);
 }
 
 fn ensureReady() !void {
-    if (global_emb != null) return;
+    if (emb_ready.load(.acquire)) return;
     const path = pending_model_path orelse return error.EmbedderNotInitialized;
-    global_emb = try Embedder.init(path);
+    try initGlobalOnce(path);
 }
 
 pub fn embed(text: []const u8, allocator: Allocator) ![]f32 {
@@ -231,4 +272,58 @@ pub fn embed(text: []const u8, allocator: Allocator) ![]f32 {
         return e.embed(text, allocator);
     }
     return error.EmbedderNotInitialized;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Regression tests
+// ═══════════════════════════════════════════════════════════════════
+
+test "concurrent embed() does not race the lazy global init" {
+    const allocator = std.testing.allocator;
+
+    // Needs the real model. Skip where it isn't installed (clean CI checkout).
+    const home_raw = libc.getenv("HOME") orelse return error.SkipZigTest;
+    const home = std.mem.span(home_raw);
+    const path = std.fmt.allocPrintSentinel(allocator, "{s}/.memxt/lib/minilm.gguf", .{home}, 0) catch return error.SkipZigTest;
+    defer allocator.free(path);
+    if (libc.access(path.ptr, 0) != 0) return error.SkipZigTest;
+
+    deinitGlobal();
+    setModelPath(path);
+
+    // The miner spawns one concurrent task per file, all landing in embed().
+    // Pre-fix, each saw `global_emb == null`, built its own Embedder and
+    // overwrote the global — swapping the llama_context (and resetting
+    // `lock_flag`, the spinlock guarding it) underneath in-flight calls. Most
+    // chunks then died with EncodeFailed/NoEmbedding and were silently dropped:
+    // mining src/ui (22 files) stored 4 drawers instead of 504, and still
+    // exited 0. Hammer the cold-start path from many threads at once; every
+    // call must succeed.
+    const N = 8;
+    const Worker = struct {
+        fn run(ok: *std.atomic.Value(u32), bad: *std.atomic.Value(u32), idx: usize) void {
+            var buf: [64]u8 = undefined;
+            const text = std.fmt.bufPrint(&buf, "regression sentence number {d}", .{idx}) catch return;
+            const a = std.testing.allocator;
+            if (embed(text, a)) |vec| {
+                a.free(vec);
+                _ = ok.fetchAdd(1, .monotonic);
+            } else |_| {
+                _ = bad.fetchAdd(1, .monotonic);
+            }
+        }
+    };
+
+    var ok: std.atomic.Value(u32) = .init(0);
+    var bad: std.atomic.Value(u32) = .init(0);
+    var threads: [N]std.Thread = undefined;
+    for (&threads, 0..) |*t, i| {
+        t.* = std.Thread.spawn(.{}, Worker.run, .{ &ok, &bad, i }) catch return error.SkipZigTest;
+    }
+    for (threads) |t| t.join();
+
+    try std.testing.expectEqual(@as(u32, 0), bad.load(.monotonic));
+    try std.testing.expectEqual(@as(u32, N), ok.load(.monotonic));
+
+    deinitGlobal();
 }

@@ -125,8 +125,33 @@ pub fn applyEnvOverrides(cfg: *Config, allocator: std.mem.Allocator) void {
     overrideZ(&cfg.database_path, "memxt.db", "MEMXT_DB", allocator);
     overrideZ(&cfg.model_path, "lib/minilm.gguf", "MEMXT_MODEL", allocator);
     overrideZ(&cfg.default_wing, "default", "MEMXT_WING", allocator);
+    resolveDatabasePath(cfg, allocator);
     resolveModelPath(cfg, allocator);
     resolveDefaultWing(cfg, allocator);
+}
+
+/// The `database_path` default is the *relative* literal "memxt.db", so a bare
+/// `memxt search` / `inspect` / `mine` run from any project directory used to
+/// silently CREATE a brand-new empty palace right there — littering repos with
+/// stray memxt.db files and, far worse, showing the user an empty memory
+/// ("0 wings, 0 drawers") as if everything they'd stored was gone. Nothing
+/// warned; it just looked like data loss.
+///
+/// Anchor the unconfigured default to the installer's canonical palace
+/// (~/.memxt/palace.db) so bare commands find the real memory from any cwd.
+/// An existing ./memxt.db still wins — that's a deliberate project-local
+/// palace, and silently re-pointing it at the global one would orphan real data.
+fn resolveDatabasePath(cfg: *Config, allocator: std.mem.Allocator) void {
+    // Explicitly configured (yaml or MEMXT_DB) — never second-guess it.
+    if (!std.mem.eql(u8, cfg.database_path, "memxt.db")) return;
+    // A project-local palace already exists here: keep using it.
+    if (fileExists(cfg.database_path)) return;
+
+    const home_raw = c.getenv("HOME") orelse return;
+    const home = std.mem.span(home_raw);
+    const tmp = std.fmt.allocPrint(allocator, "{s}/.memxt/palace.db", .{home}) catch return;
+    defer allocator.free(tmp);
+    cfg.database_path = allocator.dupeZ(u8, tmp) catch return;
 }
 
 /// If nothing (yaml nor MEMXT_WING) picked a wing, scope the default wing to
@@ -234,6 +259,38 @@ test "MEMXT_WING env override wins over derived default" {
     defer cfg.deinit(allocator);
 
     try std.testing.expectEqualStrings("explicit-wing", cfg.default_wing);
+}
+
+test "unconfigured database_path anchors to ~/.memxt/palace.db, not a stray cwd file" {
+    const allocator = std.testing.allocator;
+    _ = c.unsetenv("MEMXT_DB");
+
+    var cfg = Config{};
+    applyEnvOverrides(&cfg, allocator);
+    defer cfg.deinit(allocator);
+
+    // Regression: the default used to stay the relative literal "memxt.db",
+    // so running memxt from any project dir created an empty palace there and
+    // reported "0 wings, 0 drawers" — indistinguishable from losing everything.
+    // (Guarded: only assert the rewrite when there's no project-local palace in
+    // cwd, since an existing ./memxt.db is legitimately preferred.)
+    if (!fileExists("memxt.db")) {
+        try std.testing.expect(!std.mem.eql(u8, cfg.database_path, "memxt.db"));
+        try std.testing.expect(std.mem.endsWith(u8, cfg.database_path, "/.memxt/palace.db"));
+        try std.testing.expect(std.fs.path.isAbsolute(cfg.database_path));
+    }
+}
+
+test "MEMXT_DB env override is never second-guessed" {
+    const allocator = std.testing.allocator;
+    _ = c.setenv("MEMXT_DB", "/tmp/explicit-palace.db", 1);
+    defer _ = c.unsetenv("MEMXT_DB");
+
+    var cfg = Config{};
+    applyEnvOverrides(&cfg, allocator);
+    defer cfg.deinit(allocator);
+
+    try std.testing.expectEqualStrings("/tmp/explicit-palace.db", cfg.database_path);
 }
 
 test "default wing derives from project when nothing is configured" {
