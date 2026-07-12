@@ -1,7 +1,5 @@
 <div align="center">
-  <img src="assets/logo.svg" alt="memxt" width="280"/>
-
-  <h1>memxt</h1>
+  <img src="assets/logo.svg" alt="memXT" width="420"/>
 
   <p>
     <b>Your coding agent has amnesia. memxt is the cure — and it never leaves your laptop.</b><br/>

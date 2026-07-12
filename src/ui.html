@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>memxt — local memory monitor</title>
+<title>memXT — local memory monitor</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20192%20200%22%20width%3D%22100%25%22%20height%3D%22100%25%22%20role%3D%22img%22%20aria-label%3D%22memXT%20mark%22%3E%20%3Cdefs%3E%3ClinearGradient%20id%3D%22gold%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%220%22%20y2%3D%221%22%3E%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23FCD34D%22%2F%3E%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%23F59E0B%22%2F%3E%3C%2FlinearGradient%3E%3C%2Fdefs%3E%20%3Cg%20fill%3D%22%23F59E0B%22%20opacity%3D%220.9%22%3E%20%3Cpath%20d%3D%22M70%2086%20L10%2076%20L50%2098%20L8%20114%20L72%20108%20Z%22%2F%3E%20%3Cpath%20d%3D%22M70%2086%20L10%2076%20L50%2098%20L8%20114%20L72%20108%20Z%22%20transform%3D%22translate%28192%2C0%29%20scale%28-1%2C1%29%22%2F%3E%20%3C%2Fg%3E%20%3Cpath%20d%3D%22M118%2022%20L46%20100%20L88%20100%20L74%20178%20L146%2096%20L104%2096%20Z%22%20fill%3D%22url%28%23gold%29%22%2F%3E%20%3C%2Fsvg%3E"/>
 <style>
   :root {
     --bg: #0f1419;
@@ -24,7 +25,10 @@
     padding: 1rem 1.5rem; border-bottom: 1px solid var(--border);
     display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
   }
-  header h1 { margin: 0; font-size: 1.15rem; font-weight: 600; }
+  header h1 { margin: 0; font-size: 1.15rem; font-weight: 700; letter-spacing: .2px;
+              display: flex; align-items: center; gap: .5rem; }
+  header h1 svg { width: 22px; height: 23px; display: block; }
+  header h1 .xt { color: #22D3EE; }
   header .badge {
     font-size: 0.75rem; color: var(--ok); border: 1px solid var(--ok);
     padding: 0.15rem 0.5rem; border-radius: 999px;
@@ -63,7 +67,16 @@
 </head>
 <body>
 <header>
-  <h1>🏛️ memxt</h1>
+  <h1>
+    <svg viewBox="0 0 192 200" aria-hidden="true">
+      <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#FCD34D"/><stop offset="100%" stop-color="#F59E0B"/></linearGradient></defs>
+      <g fill="#F59E0B" opacity=".9">
+        <path d="M70 86 L10 76 L50 98 L8 114 L72 108 Z"/>
+        <path d="M70 86 L10 76 L50 98 L8 114 L72 108 Z" transform="translate(192,0) scale(-1,1)"/>
+      </g>
+      <path d="M118 22 L46 100 L88 100 L74 178 L146 96 L104 96 Z" fill="url(#g)"/>
+    </svg>mem<span class="xt">XT</span>
+  </h1>
   <span class="badge">localhost · private</span>
   <span class="mono" id="status">loading…</span>
   <div class="row" style="margin:0; margin-left:auto">

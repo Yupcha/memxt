@@ -1,3 +1,7 @@
+<div align="center">
+  <img src="../assets/logo.svg" alt="memXT" width="340"/>
+</div>
+
 # memxt — Claude Code plugin
 
 Gives Claude Code a persistent, **local-first** memory. Your agent remembers your
