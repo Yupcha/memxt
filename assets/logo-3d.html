@@ -1,0 +1,104 @@
+<!doctype html>
+<meta charset="utf-8"/>
+<title>memXT — 3D logo</title>
+<style>
+  html,body{margin:0;height:100%;background:#0B0B14;overflow:hidden}
+  canvas{display:block}
+  .hint{position:fixed;left:0;right:0;bottom:18px;text-align:center;
+        font:500 13px/1.4 -apple-system,system-ui,'Segoe UI',Helvetica,sans-serif;
+        color:#64748B;letter-spacing:.3px;pointer-events:none}
+</style>
+<div class="hint">drag to orbit · scroll to zoom</div>
+<script type="importmap">
+{"imports":{
+  "three":"https://unpkg.com/three@0.160.0/build/three.module.js",
+  "three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"
+}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import {SVGLoader} from 'three/addons/loaders/SVGLoader.js';
+import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+
+const SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 590 200">
+  <path fill="#F59E0B" d="M70 86 L10 76 L50 98 L8 114 L72 108 Z"/>
+  <path fill="#F59E0B" d="M70 86 L10 76 L50 98 L8 114 L72 108 Z" transform="translate(192,0) scale(-1,1)"/>
+  <path fill="#FBBF24" d="M118 22 L46 100 L88 100 L74 178 L146 96 L104 96 Z"/>
+  <g transform="translate(216.0,133.0) scale(0.0458984375,-0.0458984375)">
+    <path fill="#F8FAFC" d="M89 0V1082.7H420.3V892.7H427Q458.7 989.7 540 1047.5Q621.3 1105.3 731.3 1105.3Q808.3 1105.3 869.2 1078.5Q930 1051.7 971 1000.8Q1012 950 1028 876.7H1034.7Q1057 946.3 1105.2 997.5Q1153.3 1048.7 1221.2 1077Q1289 1105.3 1369.3 1105.3Q1475.7 1105.3 1555.3 1059.2Q1635 1013 1679.7 930.5Q1724.3 848 1724.3 738V0H1393V653.3Q1393 712.7 1374.5 752.7Q1356 792.7 1320.3 813.3Q1284.7 834 1231.7 834Q1181.3 834 1143.7 810.8Q1106 787.7 1085.7 746.2Q1065.3 704.7 1065.3 648.3V0H748V659Q748 715.3 729.2 754.3Q710.3 793.3 674.8 813.7Q639.3 834 588.3 834Q538 834 500.2 810.2Q462.3 786.3 441.3 744Q420.3 701.7 420.3 645.3V0Z M2406 -22.7Q2237 -22.7 2115.2 45.3Q1993.3 113.3 1927.8 239.8Q1862.3 366.3 1862.3 540V541Q1862.3 714.7 1927.7 841.2Q1993 967.7 2112.3 1036.5Q2231.7 1105.3 2393.7 1105.3Q2555.7 1105.3 2674.2 1038.2Q2792.7 971 2857.3 849Q2922 727 2922 563V464.3H2024.7V664.3H2766.7L2611.3 477V604.7Q2611.3 689.7 2584.8 748Q2558.3 806.3 2511 836.2Q2463.7 866 2400.7 866Q2337.7 866 2289.7 835.5Q2241.7 805 2214.7 746.5Q2187.7 688 2187.7 604.7V475.7Q2187.7 394.3 2214.8 336.3Q2242 278.3 2292.3 247.5Q2342.7 216.7 2412.7 216.7Q2470.7 216.7 2512 235Q2553.3 253.3 2578.7 280.3Q2604 307.3 2612.3 333L2614 338H2914.3L2911.7 326Q2899.3 268.7 2865.2 207.7Q2831 146.7 2770.7 94.2Q2710.3 41.7 2620.3 9.5Q2530.3 -22.7 2406 -22.7Z M3064 0V1082.7H3395.3V892.7H3402Q3433.7 989.7 3515 1047.5Q3596.3 1105.3 3706.3 1105.3Q3783.3 1105.3 3844.2 1078.5Q3905 1051.7 3946 1000.8Q3987 950 4003 876.7H4009.7Q4032 946.3 4080.2 997.5Q4128.3 1048.7 4196.2 1077Q4264 1105.3 4344.3 1105.3Q4450.7 1105.3 4530.3 1059.2Q4610 1013 4654.7 930.5Q4699.3 848 4699.3 738V0H4368V653.3Q4368 712.7 4349.5 752.7Q4331 792.7 4295.3 813.3Q4259.7 834 4206.7 834Q4156.3 834 4118.7 810.8Q4081 787.7 4060.7 746.2Q4040.3 704.7 4040.3 648.3V0H3723V659Q3723 715.3 3704.2 754.3Q3685.3 793.3 3649.8 813.7Q3614.3 834 3563.3 834Q3513 834 3475.2 810.2Q3437.3 786.3 3416.3 744Q3395.3 701.7 3395.3 645.3V0Z"/>
+    <path fill="#22D3EE" d="M4826.3 0 5352 853.3 5273.7 572.3V730.3L4827.7 1443H5229.3L5509.3 942.7H5668L5446.3 808.7L5798.7 1443H6180.3L5716 726V568L5635.7 847.7L6175.3 0H5788.7L5494.7 482H5336L5563.7 612.3L5193 0Z M6673.7 0V1165H6268.7V1443H7421.3V1165H7016.3V0Z"/>
+  </g>
+</svg>`;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#0B0B14');
+
+const camera = new THREE.PerspectiveCamera(38, innerWidth/innerHeight, 1, 4000);
+camera.position.set(0, 40, 620);
+
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
+document.body.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.enablePan = false;
+
+// ── Lights: warm key + cool rim, so gold reads metallic and cyan pops
+scene.add(new THREE.AmbientLight('#ffffff', 0.55));
+const key = new THREE.DirectionalLight('#FFF3D0', 2.6);
+key.position.set(-180, 260, 420); scene.add(key);
+const rim = new THREE.DirectionalLight('#22D3EE', 1.5);
+rim.position.set(320, -140, -260); scene.add(rim);
+const warm = new THREE.PointLight('#FBBF24', 1.9, 1600);
+warm.position.set(120, 60, 260); scene.add(warm);
+
+// ── Extrude the logo's own outlines (same paths, same font, same colours)
+const group = new THREE.Group();
+for (const p of new SVGLoader().parse(SVG).paths) {
+  const col = p.userData.style.fill || '#FBBF24';
+  const key = col.toLowerCase();                       // SVGLoader may keep source case
+  const gold = key !== '#f8fafc' && key !== '#22d3ee';
+  const mat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(col),
+    metalness: gold ? 0.85 : 0.35,
+    roughness: gold ? 0.25 : 0.45,
+    side: THREE.DoubleSide,
+  });
+  for (const shape of SVGLoader.createShapes(p)) {
+    const geo = new THREE.ExtrudeGeometry(shape, {
+      depth: gold ? 26 : 18, bevelEnabled: true,
+      bevelThickness: 2.4, bevelSize: 1.6, bevelSegments: 4, curveSegments: 14,
+    });
+    group.add(new THREE.Mesh(geo, mat));
+  }
+}
+group.scale.y = -1;                       // SVG y grows down; three grows up
+const c = new THREE.Vector3();
+new THREE.Box3().setFromObject(group).getCenter(c);
+group.position.sub(c);
+
+const pivot = new THREE.Group();
+pivot.add(group);
+scene.add(pivot);
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+const t0 = performance.now();
+(function loop(){
+  requestAnimationFrame(loop);
+  const t = (performance.now() - t0) / 1000;
+  pivot.rotation.y = Math.sin(t * 0.45) * 0.42;   // gentle sway, not a spin
+  pivot.rotation.x = Math.sin(t * 0.32) * 0.10;
+  pivot.position.y = Math.sin(t * 0.7) * 6;        // slow float
+  controls.update();
+  renderer.render(scene, camera);
+})();
+</script>

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 200" width="100%" height="100%" role="img" aria-label="memXT mark">
+  <defs><linearGradient id="gold" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#FCD34D"/><stop offset="100%" stop-color="#F59E0B"/></linearGradient></defs>
+  <g fill="#F59E0B" opacity="0.9">
+    <path d="M70 86 L10 76 L50 98 L8 114 L72 108 Z"/>
+    <path d="M70 86 L10 76 L50 98 L8 114 L72 108 Z" transform="translate(192,0) scale(-1,1)"/>
+  </g>
+  <path d="M118 22 L46 100 L88 100 L74 178 L146 96 L104 96 Z" fill="url(#gold)"/>
+</svg>
