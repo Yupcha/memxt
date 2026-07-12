@@ -649,9 +649,16 @@ pub const Palace = struct {
             }
             const kind = db.columnText(stmt, 7) orelse "document";
             if (!kindAllowed(kind, opts.kinds)) continue;
-            // bm25 is negative/lower-better; map to a distance-like positive score.
+            // bm25() is negative, and *more negative = stronger match*. Squash it to a
+            // bounded lower-is-better distance in (0,1] that fuses cleanly with vector
+            // distances: strong match -> ~0, weak match -> ~1.
+            //
+            // NB: taking abs(bm) here inverts the ranking — a strong match (-4.2) would
+            // look *farther* than a weak one (-0.3), so the keyword arm of hybrid search
+            // ranked backwards and the doc literally containing the query term lost.
             const bm = db.columnDouble(stmt, 1);
-            const distance = if (bm < 0) -bm else bm;
+            const strength = if (bm < 0) -bm else 0.0;
+            const distance = 1.0 / (1.0 + strength);
             try results.append(allocator, .{
                 .drawer_id = db.columnInt64(stmt, 0),
                 .content = try allocator.dupe(u8, db.columnText(stmt, 2) orelse ""),
