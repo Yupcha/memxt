@@ -28,9 +28,15 @@ echo "  model: $MEMXT_MODEL"
 
 "$BIN" init >/dev/null 2>&1
 
-# 1) schema version is stamped
+# 1) schema version is stamped. Assert it's SET, not a specific number — the
+# schema legitimately evolves (it is v5 now), and pinning the literal just makes
+# this fail on every migration, which is what it did.
 ver=$(sqlite3 "$MEMXT_DB" "PRAGMA user_version;" 2>/dev/null || echo "")
-[ "$ver" = "1" ] && ok "schema version stamped (=1)" || bad "schema version not stamped (got '$ver')"
+if [ -n "$ver" ] && [ "$ver" -gt 0 ] 2>/dev/null; then
+  ok "schema version stamped (=$ver)"
+else
+  bad "schema version not stamped (got '$ver')"
+fi
 
 # 2) directory mining ingests multiple files
 CORPUS="$WORK/corpus"; mkdir -p "$CORPUS"
@@ -41,8 +47,12 @@ printf 'The French Revolution began in 1789 and led to the rise of Napoleon Bona
 mine_out=$("$BIN" mine "$CORPUS" testwing 2>&1)
 have "$mine_out" "Drawers created: 4" && ok "directory mine ingested 4 files" || bad "directory mine wrong drawer count: $(echo "$mine_out" | grep Drawers)"
 
-# 3) semantic ranking: paraphrase queries (no shared keywords) hit the right file
-rank() { "$BIN" search "$1" 2>&1 | grep -m1 "Source:" | sed 's/.*Source: //'; }
+# 3) semantic ranking: paraphrase queries (no shared keywords) hit the right file.
+# MUST search --wing testwing: step 2 mines into "testwing", but a bare `search`
+# scopes to the default wing (derived from the git repo → "memxt"), which is
+# empty here. Without this the ranking assertions compared against '' and failed
+# for a wing mismatch, not a ranking regression.
+rank() { "$BIN" search "$1" --wing testwing 2>&1 | grep -m1 "Source:" | sed 's/.*Source: //'; }
 check_rank() { local got; got=$(rank "$1"); [ "$got" = "$2" ] && ok "rank: '$1' -> $2" || bad "rank: '$1' -> got '$got', want $2"; }
 check_rank "how do biological cells produce energy" "biology.txt"
 check_rank "brewing a great cup of coffee"          "coffee.txt"
@@ -58,7 +68,19 @@ mcp_out=$(printf '%s\n' \
   | "$BIN" mcp 2>/dev/null)
 have "$mcp_out" '"protocolVersion":"2025-11-25"' && ok "MCP initialize echoes protocol version" || bad "MCP initialize bad"
 # tools/list is one JSON line, so count occurrences (grep -o), not matching lines.
-[ "$(echo "$mcp_out" | grep -o 'inputSchema' | wc -l | tr -d ' ')" = "4" ] && ok "MCP tools/list exposes 4 tools" || bad "MCP tools/list wrong tool count"
+# Assert the CONTRACT (the core tools an agent depends on are exposed) rather than
+# an exact count: the old `= 4` broke the moment tools were added (there are 8),
+# which tells you nothing about whether the server still works.
+missing=""
+for t in memory_search memory_store memory_wake_up memory_get memory_forget; do
+  echo "$mcp_out" | grep -q "\"name\":\"$t\"" || missing="$missing $t"
+done
+n_tools=$(echo "$mcp_out" | grep -o 'inputSchema' | wc -l | tr -d ' ')
+if [ -z "$missing" ] && [ "$n_tools" -ge 5 ]; then
+  ok "MCP tools/list exposes the core tools ($n_tools total)"
+else
+  bad "MCP tools/list missing:$missing (count=$n_tools)"
+fi
 have "$mcp_out" "QUASAR-77" && ok "MCP store -> recall round-trip" || bad "MCP store/recall failed"
 
 # 5) hooks: SessionStart injects context; PreCompact saves the transcript tail
