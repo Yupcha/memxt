@@ -13,6 +13,11 @@ pub const c = @cImport({
     @cInclude("sqlite-vec.h");
 });
 
+const posix = @cImport({
+    @cInclude("sys/stat.h");
+    @cInclude("sys/types.h");
+});
+
 /// Bump when the on-disk schema changes; add a migration branch in
 /// `migrateSchema` for each step. Persisted via SQLite's `PRAGMA user_version`.
 /// v2: FTS5 full-text index for hybrid keyword + vector search.
@@ -33,6 +38,10 @@ pub const Database = struct {
     handle: *Sqlite3,
 
     pub fn open(path: [*:0]const u8) !Database {
+        // Ensure parent directory exists (e.g. ~/.memxt/ for the default palace).
+        // sqlite3_open does not create intermediate directories.
+        ensureParentDirs(std.mem.span(path));
+
         var handle: ?*Sqlite3 = null;
         if (c.sqlite3_open(path, &handle) != SQLITE_OK) {
             if (handle) |h| _ = c.sqlite3_close(h);
@@ -407,6 +416,28 @@ pub const Database = struct {
         self.migrateSchema();
     }
 };
+
+/// Create every intermediate directory for an absolute or relative DB path.
+/// Best-effort: ignores EEXIST and other races. sqlite3_open will not mkdir.
+fn ensureParentDirs(path: []const u8) void {
+    const dir = std.fs.path.dirname(path) orelse return;
+    if (dir.len == 0) return;
+    var i: usize = 0;
+    while (i < dir.len) : (i += 1) {
+        if (dir[i] != '/') continue;
+        if (i == 0) continue; // skip root "/"
+        var buf: [std.fs.max_path_bytes]u8 = undefined;
+        if (i >= buf.len) return;
+        @memcpy(buf[0..i], dir[0..i]);
+        buf[i] = 0;
+        _ = posix.mkdir(&buf, 0o755);
+    }
+    var final_buf: [std.fs.max_path_bytes]u8 = undefined;
+    if (dir.len >= final_buf.len) return;
+    @memcpy(final_buf[0..dir.len], dir);
+    final_buf[dir.len] = 0;
+    _ = posix.mkdir(&final_buf, 0o755);
+}
 
 // ── Statement helpers ──
 
