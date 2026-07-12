@@ -10,6 +10,8 @@ mempalace
 # IDE / OS
 .DS_Store
 .vscode/
+.cursor/
+.grok/
 
 # Project Specific Testing / State
 tmp/
@@ -25,6 +27,9 @@ zig-pkg/
 # Machine Learning Tensors / Models
 lib/*.gguf
 lib/llama.cpp/build/
+
+# Competitor research clones (keep kill-sheet only in git)
+research/competitors/
 
 # External Configs mapping over default parameters
 memxt.yaml

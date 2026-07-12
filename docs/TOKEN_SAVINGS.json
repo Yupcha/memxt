@@ -1,0 +1,34 @@
+{
+  "tokenizer": "tiktoken/cl100k_base",
+  "questions": [
+    "How do we wire Grok CLI to memxt?",
+    "What is the product positioning - Claude Code or Zig?",
+    "What storage stack does memxt use and why SQLite?",
+    "What is schema v5 and what does dream do with vectors?",
+    "Where is the palace DB on this machine and default wing?"
+  ],
+  "without": {
+    "full_dump": 9623,
+    "redump_each_q": 48115,
+    "recap_only": 176
+  },
+  "with": {
+    "wake_up": 1281,
+    "profile": 287,
+    "searches": [
+      619,
+      443,
+      119,
+      122,
+      119
+    ],
+    "wake_plus_5_searches": 2703
+  },
+  "headline": {
+    "without_tokens": 9623,
+    "with_tokens": 2703,
+    "saved_tokens": 6920,
+    "saved_pct": 71.9,
+    "ratio": 3.56
+  }
+}

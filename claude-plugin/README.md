@@ -6,14 +6,28 @@ leaves your machine.
 
 ## What it adds
 
-- **MCP server `memory`** with four tools: `memory_search`, `memory_store`,
-  `memory_wake_up`, `memory_stats`.
-- **SessionStart hook** — injects a compact "wake-up" brief of recent memory at the
-  start of every session (and again right after compaction).
-- **PreCompact hook** — saves the recent conversation *before* it's compacted away,
-  so context survives.
-- **Skill `using-memory`** — teaches Claude when to recall and when to persist.
+- **MCP server `memory`** with progressive disclosure:
+  `memory_search` (index by default) → `memory_get` (full body by id),
+  plus `memory_store`, `memory_wake_up`, `memory_profile`, `memory_stats`, …
+- **SessionStart hook** — injects a compact wake-up brief every session
+  (and again right after compaction).
+- **PreCompact hook** — saves the conversation tail *before* compact.
+- **Stop hook** — autosaves the turn tail (verbatim, local MiniLM only —
+  **no cloud LLM compression**).
+- **Skill `using-memory`** — index → get token discipline + when to store.
 - **Slash commands** — `/remember <fact>` and `/recall <query>`.
+
+### vs claude-mem
+
+| | memxt | claude-mem |
+|--|--|--|
+| Capture | SessionStart + PreCompact + **Stop** | Many hooks + PostToolUse stream |
+| Compress | **None** (verbatim + local embed) | Claude/Gemini/OpenRouter SDK |
+| Search | Hybrid vec+FTS in one binary | FTS + optional Chroma + worker |
+| Runtime | ~7MB Zig + MiniLM | Node + Bun + worker service |
+| Multi-agent | One palace (Claude/Codex/Cursor/Grok) | Claude-first product |
+
+Same job (Claude stops forgetting). Different bet: **local kernel**, not session-compressor SaaS-adjacent stack.
 
 ## Install
 

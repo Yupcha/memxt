@@ -2,17 +2,19 @@
 // memxt/mcp.zig — Model Context Protocol server (stdio JSON-RPC)
 //
 // Exposes the memory palace to any MCP-capable agent (Claude Code, Cursor,
-// Zed, …) over newline-delimited JSON-RPC on stdin/stdout. Five real tools:
+// Zed, …) over newline-delimited JSON-RPC on stdin/stdout.
 //
-//   memory_search   — semantic recall across everything mined/stored
+// Progressive disclosure (token-efficient, claude-mem-style, zero cloud LLM):
+//   memory_search   — compact INDEX by default (~50–120 tokens/hit)
+//   memory_get      — full drawer body by id(s) only when needed
 //   memory_store    — persist a decision / snippet / fact as a memory
 //   memory_forget   — delete a memory by its drawer id
 //   memory_wake_up  — load the compact session-start context
+//   memory_profile  — stable project facts (no model)
+//   memory_dream    — hot/cold consolidation
 //   memory_stats    — palace statistics
 //
-// Plus two prompts (remember / recall) and one resource (the wake-up brief),
-// so the slash commands are portable to any MCP client, not just Claude Code.
-//
+// Plus two prompts (remember / recall) and one resource (the wake-up brief).
 // All work happens locally; nothing leaves the machine.
 // ═══════════════════════════════════════════════════════════════════
 
@@ -25,6 +27,9 @@ const miner = @import("miner.zig");
 const searcher = @import("searcher.zig");
 const embedder = @import("embedder.zig");
 const wakeup = @import("wakeup.zig");
+const profile_mod = @import("profile.zig");
+const facts_mod = @import("facts.zig");
+const dream_mod = @import("dream.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -40,36 +45,51 @@ const TOOLS_LIST =
     \\  "tools": [
     \\    {
     \\      "name": "memory_search",
-    \\      "description": "Semantic search across the local memory palace (mined code, decisions, notes, past sessions). Use this BEFORE answering questions about prior work, past decisions, or anything that might already be remembered. Returns the most relevant stored memories with their source.",
+    \\      "description": "Hybrid semantic + keyword search of the local memory palace. DEFAULT detail=index returns a compact index (~id, path, ~100-char snippet) so you can filter before loading full text — progressive disclosure saves tokens. Use BEFORE answering about prior work. Then call memory_get on promising ids.",
     \\      "inputSchema": {
     \\        "type": "object",
     \\        "properties": {
     \\          "query": { "type": "string", "description": "What to recall, in natural language." },
-    \\          "limit": { "type": "integer", "description": "Max results (default 5).", "default": 5 }
+    \\          "limit": { "type": "integer", "description": "Max results (default 5).", "default": 5 },
+    \\          "wing": { "type": "string", "description": "Limit search to one project/domain wing (optional)." },
+    \\          "mode": { "type": "string", "description": "hybrid|memories|documents|facts|episodes (default hybrid)." },
+    \\          "detail": { "type": "string", "description": "index (default, compact) | full (entire body in results)." },
+    \\          "as_of": { "type": "integer", "description": "Unix timestamp for temporal fact queries (optional)." }
     \\        },
     \\        "required": ["query"]
     \\      }
     \\    },
     \\    {
+    \\      "name": "memory_get",
+    \\      "description": "Fetch full verbatim memory body by drawer id(s). Use AFTER memory_search (detail=index) when a hit looks relevant. Batch multiple ids in one call.",
+    \\      "inputSchema": {
+    \\        "type": "object",
+    \\        "properties": {
+    \\          "id": { "type": "integer", "description": "Single drawer id from memory_search." },
+    \\          "ids": { "type": "array", "items": { "type": "integer" }, "description": "Batch of drawer ids (preferred)." }
+    \\        }
+    \\      }
+    \\    },
+    \\    {
     \\      "name": "memory_store",
-    \\      "description": "Persist an important memory for future sessions: a decision and its rationale, a key code snippet, a constraint, a fact about the project or user. Store anything you'd want to remember next time. Content is kept verbatim.",
+    \\      "description": "Persist an important memory for future sessions: a decision and its rationale, a key code snippet, a constraint, a fact about the project or user. Store anything you'd want to remember next time. Content is kept verbatim. Prefer room 'decisions' for architecture choices so they appear in the wake-up profile.",
     \\      "inputSchema": {
     \\        "type": "object",
     \\        "properties": {
     \\          "content": { "type": "string", "description": "The exact text to remember." },
     \\          "wing": { "type": "string", "description": "Project/domain bucket (default: current project)." },
-    \\          "room": { "type": "string", "description": "Topic within the wing (default: notes)." }
+    \\          "room": { "type": "string", "description": "Topic within the wing (default: notes). Use 'decisions' for durable choices." }
     \\        },
     \\        "required": ["content"]
     \\      }
     \\    },
     \\    {
     \\      "name": "memory_wake_up",
-    \\      "description": "Load the compact wake-up context (identity + most relevant recent memories, ~600-900 tokens). Call at the start of a session to recover continuity.",
+    \\      "description": "Load the compact wake-up brief: L0 identity + L1 project profile (decisions) + L2 recent work (~600-1200 tokens). Call at the start of a session to recover continuity.",
     \\      "inputSchema": {
     \\        "type": "object",
     \\        "properties": {
-    \\          "wing": { "type": "string", "description": "Limit to one project/domain (optional)." }
+    \\          "wing": { "type": "string", "description": "Limit to one project/domain (defaults to current project wing)." }
     \\        }
     \\      }
     \\    },
@@ -82,6 +102,27 @@ const TOOLS_LIST =
     \\          "id": { "type": "integer", "description": "The drawer id to forget (from a memory_search result)." }
     \\        },
     \\        "required": ["id"]
+    \\      }
+    \\    },
+    \\    {
+    \\      "name": "memory_profile",
+    \\      "description": "Load the project profile (stable facts and decisions) without semantic search. Fast (~ms), no embedding model. Call when you need who/what/conventions for this project.",
+    \\      "inputSchema": {
+    \\        "type": "object",
+    \\        "properties": {
+    \\          "wing": { "type": "string", "description": "Project wing (defaults to current project)." }
+    \\        }
+    \\      }
+    \\    },
+    \\    {
+    \\      "name": "memory_dream",
+    \\      "description": "Run consolidation: expire stale facts, demote cold vectors under budget, build episode clusters. Keeps infinite history while bounding hot search cost.",
+    \\      "inputSchema": {
+    \\        "type": "object",
+    \\        "properties": {
+    \\          "budget": { "type": "integer", "description": "Max hot vectors (default 50000)." },
+    \\          "dry_run": { "type": "boolean", "description": "Report only, do not demote." }
+    \\        }
     \\      }
     \\    },
     \\    {
@@ -130,7 +171,7 @@ const RESOURCES_LIST =
     \\    {
     \\      "uri": "memxt://wakeup",
     \\      "name": "Memory wake-up brief",
-    \\      "description": "Compact session-start context: identity + most relevant recent memories (~600-900 tokens).",
+    \\      "description": "Compact session-start context: L0 identity + L1 project profile + L2 recent work (~600-1200 tokens).",
     \\      "mimeType": "text/plain"
     \\    }
     \\  ]
@@ -225,7 +266,7 @@ fn handleLine(
     } else if (std.mem.eql(u8, method, "resources/list")) {
         try sendRawResult(allocator, io, id, RESOURCES_LIST);
     } else if (std.mem.eql(u8, method, "resources/read")) {
-        try handleResourceRead(allocator, database, io, id, req.params);
+        try handleResourceRead(allocator, database, cfg, io, id, req.params);
     } else {
         try sendError(allocator, io, id, -32601, "method not found");
     }
@@ -264,7 +305,7 @@ fn dispatchTool(
 
     // Semantic tools need the embedding model; load it lazily on first use so
     // server startup (initialize/tools/list) stays instant.
-    if (std.mem.eql(u8, name, "memory_search") or std.mem.eql(u8, name, "memory_store")) {
+    if (std.mem.eql(u8, name, "memory_search") or std.mem.eql(u8, name, "memory_store") or std.mem.eql(u8, name, "memory_dream")) {
         if (!embedder.isReady()) embedder.initGlobal(cfg.model_path) catch {};
     }
 
@@ -274,7 +315,18 @@ fn dispatchTool(
         // out-of-i32 or negative value is UB via @intCast (and an overflow in
         // the searcher's `limit * 2`) under ReleaseFast.
         const limit: i32 = @intCast(std.math.clamp(getInt(args, "limit") orelse 5, 1, 100));
-        return toolSearch(allocator, pal, io, query, limit);
+        const wing = getStr(args, "wing") orelse blk: {
+            if (!std.mem.eql(u8, cfg.default_wing, "default")) break :blk cfg.default_wing;
+            break :blk null;
+        };
+        const mode_s = getStr(args, "mode") orelse "hybrid";
+        const mode = searcher.SearchMode.parse(mode_s) orelse .hybrid;
+        const as_of = getInt(args, "as_of");
+        const detail_s = getStr(args, "detail") orelse "index";
+        const full = std.ascii.eqlIgnoreCase(detail_s, "full");
+        return toolSearch(allocator, pal, io, query, limit, wing, mode, as_of, full);
+    } else if (std.mem.eql(u8, name, "memory_get")) {
+        return toolGet(allocator, pal, args);
     } else if (std.mem.eql(u8, name, "memory_store")) {
         const content = getStr(args, "content") orelse return error.MissingContent;
         const wing = getStr(args, "wing") orelse cfg.default_wing;
@@ -292,21 +344,85 @@ fn dispatchTool(
             try std.fmt.allocPrint(allocator, "No memory #{d} found to forget.", .{fid});
         return .{ .text = text };
     } else if (std.mem.eql(u8, name, "memory_wake_up")) {
-        const wing = getStr(args, "wing");
+        const wing = getStr(args, "wing") orelse blk: {
+            if (!std.mem.eql(u8, cfg.default_wing, "default")) break :blk cfg.default_wing;
+            break :blk null;
+        };
         return .{ .text = try wakeup.generate(database, wing, allocator) };
+    } else if (std.mem.eql(u8, name, "memory_profile")) {
+        const wing_name = getStr(args, "wing") orelse cfg.default_wing;
+        const wing_id = pal.getWingId(wing_name) orelse {
+            return .{ .text = try std.fmt.allocPrint(allocator, "No wing '{s}' yet. Store a decision or run memxt mine.", .{wing_name}) };
+        };
+        var text = try profile_mod.renderBrief(database, wing_id, wing_name, allocator);
+        // Append active facts for extra context.
+        if (facts_mod.listActive(database, wing_id, 15, allocator)) |fl| {
+            defer facts_mod.freeFacts(fl, allocator);
+            if (fl.len > 0) {
+                var buf: std.ArrayListUnmanaged(u8) = .empty;
+                errdefer buf.deinit(allocator);
+                try buf.appendSlice(allocator, text);
+                allocator.free(text);
+                text = ""; // ownership moved
+                try buf.appendSlice(allocator, "\n### Active facts\n");
+                for (fl) |f| {
+                    const line = try std.fmt.allocPrint(allocator, "- {s} —[{s}]→ {s}\n", .{ f.subject, f.predicate, f.object });
+                    defer allocator.free(line);
+                    try buf.appendSlice(allocator, line);
+                }
+                return .{ .text = try buf.toOwnedSlice(allocator) };
+            }
+        } else |_| {}
+        return .{ .text = text };
+    } else if (std.mem.eql(u8, name, "memory_dream")) {
+        var opts = dream_mod.DreamOptions{};
+        if (getInt(args, "budget")) |b| opts.hot_budget = b;
+        if (args) |a| {
+            if (a == .object) {
+                if (a.object.get("dry_run")) |v| {
+                    opts.dry_run = switch (v) {
+                        .bool => |b| b,
+                        else => false,
+                    };
+                }
+            }
+        }
+        const report = try dream_mod.run(database, opts, allocator);
+        return .{ .text = try dream_mod.formatReport(report, allocator) };
     } else if (std.mem.eql(u8, name, "memory_stats")) {
         return .{ .text = try pal.stats(allocator) };
     }
     return .{ .text = try std.fmt.allocPrint(allocator, "Unknown tool: {s}", .{name}) };
 }
 
-fn toolSearch(allocator: Allocator, pal: *palace.Palace, io: std.Io, query: []const u8, limit: i32) !ToolResult {
-    if (!embedder.isReady()) return .{ .text = try allocator.dupe(u8, "Memory model not loaded; semantic search unavailable.") };
+const INDEX_SNIPPET_CHARS: usize = 120;
 
-    const q_vec = try embedder.embed(query, allocator);
-    defer allocator.free(q_vec);
+fn toolSearch(
+    allocator: Allocator,
+    pal: *palace.Palace,
+    io: std.Io,
+    query: []const u8,
+    limit: i32,
+    wing: ?[]const u8,
+    mode: searcher.SearchMode,
+    as_of: ?i64,
+    full: bool,
+) !ToolResult {
+    var q_vec: []const f32 = &[_]f32{};
+    var q_owned = false;
+    if (mode != .facts) {
+        if (!embedder.isReady()) return .{ .text = try allocator.dupe(u8, "Memory model not loaded; semantic search unavailable.") };
+        q_vec = try embedder.embed(query, allocator);
+        q_owned = true;
+    }
+    defer if (q_owned) allocator.free(q_vec);
 
-    const results = try searcher.searchHybrid(pal, query, q_vec, .{ .limit = limit }, allocator, io);
+    const results = try searcher.search(pal, query, q_vec, .{
+        .limit = limit,
+        .wing = wing,
+        .mode = mode,
+        .as_of = as_of,
+    }, allocator, io);
     defer {
         for (results) |r| {
             allocator.free(r.content);
@@ -319,28 +435,41 @@ fn toolSearch(allocator: Allocator, pal: *palace.Palace, io: std.Io, query: []co
 
     if (results.len == 0) return .{ .text = try allocator.dupe(u8, "No relevant memories found.") };
 
-    // ── Human-readable text block (unchanged shape for the Claude Code plugin) ──
     var out: std.ArrayListUnmanaged(u8) = .empty;
     errdefer out.deinit(allocator);
 
-    const header = try std.fmt.allocPrint(allocator, "Found {d} relevant memor{s}:\n\n", .{
-        results.len, if (results.len == 1) "y" else "ies",
-    });
-    defer allocator.free(header);
-    try out.appendSlice(allocator, header);
-
-    for (results, 0..) |r, i| {
-        const block = try std.fmt.allocPrint(allocator, "{d}. [#{d} {s}/{s}] {s}\n{s}\n\n", .{
-            i + 1, r.drawer_id, r.wing_name, r.room_name, r.source_path, r.content,
+    if (full) {
+        const header = try std.fmt.allocPrint(allocator, "Found {d} relevant memor{s}:\n\n", .{
+            results.len, if (results.len == 1) "y" else "ies",
         });
-        defer allocator.free(block);
-        try out.appendSlice(allocator, block);
+        defer allocator.free(header);
+        try out.appendSlice(allocator, header);
+        for (results, 0..) |r, i| {
+            const block = try std.fmt.allocPrint(allocator, "{d}. [#{d} {s}/{s}] {s}\n{s}\n\n", .{
+                i + 1, r.drawer_id, r.wing_name, r.room_name, r.source_path, r.content,
+            });
+            defer allocator.free(block);
+            try out.appendSlice(allocator, block);
+        }
+    } else {
+        // Compact index: ids + short snippets. Agent calls memory_get for full bodies.
+        const header = try std.fmt.allocPrint(allocator,
+            \\Found {d} hit(s) (index). Call memory_get with promising id(s) for full text.
+            \\
+            \\
+        , .{results.len});
+        defer allocator.free(header);
+        try out.appendSlice(allocator, header);
+        for (results, 0..) |r, i| {
+            const snip = snippetOf(r.content, INDEX_SNIPPET_CHARS);
+            const block = try std.fmt.allocPrint(allocator, "{d}. #{d}  [{s}/{s}]  {s}\n   {s}\n", .{
+                i + 1, r.drawer_id, r.wing_name, r.room_name, r.source_path, snip,
+            });
+            defer allocator.free(block);
+            try out.appendSlice(allocator, block);
+        }
     }
 
-    // ── Structured content: {"results":[{id,wing,room,source,score,content}]} ──
-    // Each hit carries the stable drawer id (usable directly with memory_forget)
-    // plus metadata. Built as a slice of structs borrowing `results`' memory,
-    // which is valid until the deferred free above runs.
     const Hit = struct {
         id: i64,
         wing: []const u8,
@@ -348,23 +477,155 @@ fn toolSearch(allocator: Allocator, pal: *palace.Palace, io: std.Io, query: []co
         source: []const u8,
         score: f64,
         content: []const u8,
+        detail: []const u8,
     };
     const hits = try allocator.alloc(Hit, results.len);
     defer allocator.free(hits);
+    // Owned snippets for index mode so structured JSON stays self-contained.
+    var snip_owned: std.ArrayListUnmanaged([]u8) = .empty;
+    defer {
+        for (snip_owned.items) |s| allocator.free(s);
+        snip_owned.deinit(allocator);
+    }
     for (results, 0..) |r, i| {
+        const body: []const u8 = if (full) r.content else blk: {
+            const s = try allocator.dupe(u8, snippetOf(r.content, INDEX_SNIPPET_CHARS));
+            try snip_owned.append(allocator, s);
+            break :blk s;
+        };
         hits[i] = .{
             .id = r.drawer_id,
             .wing = r.wing_name,
             .room = r.room_name,
             .source = r.source_path,
             .score = r.score,
-            .content = r.content,
+            .content = body,
+            .detail = if (full) "full" else "index",
         };
     }
     const structured = try std.json.Stringify.valueAlloc(allocator, .{ .results = hits }, .{});
     errdefer allocator.free(structured);
 
     return .{ .text = try out.toOwnedSlice(allocator), .structured = structured };
+}
+
+fn snippetOf(content: []const u8, max_chars: usize) []const u8 {
+    // Collapse runs of whitespace into single spaces for denser index lines.
+    if (content.len == 0) return "";
+    var end = @min(content.len, max_chars);
+    // Prefer breaking at a space near the end.
+    if (end < content.len) {
+        var i = end;
+        while (i > max_chars / 2) : (i -= 1) {
+            if (content[i] == ' ' or content[i] == '\n') {
+                end = i;
+                break;
+            }
+        }
+    }
+    return content[0..end];
+}
+
+fn toolGet(allocator: Allocator, pal: *palace.Palace, args: ?std.json.Value) !ToolResult {
+    var ids_buf: [32]i64 = undefined;
+    const n = collectIds(args, &ids_buf);
+    if (n == 0) return .{ .text = try allocator.dupe(u8, "memory_get requires `id` or `ids` (drawer ids from memory_search).") };
+
+    var out: std.ArrayListUnmanaged(u8) = .empty;
+    errdefer out.deinit(allocator);
+
+    const Hit = struct {
+        id: i64,
+        wing: []const u8,
+        room: []const u8,
+        source: []const u8,
+        kind: []const u8,
+        content: []const u8,
+    };
+    var hits_list: std.ArrayListUnmanaged(Hit) = .empty;
+    defer hits_list.deinit(allocator);
+    var owned: std.ArrayListUnmanaged(palace.Palace.DrawerDetail) = .empty;
+    defer {
+        for (owned.items) |*d| d.deinit(allocator);
+        owned.deinit(allocator);
+    }
+
+    var found: usize = 0;
+    for (ids_buf[0..n]) |id| {
+        const row = pal.getDrawer(id, allocator) catch continue;
+        const detail = row orelse {
+            const miss = try std.fmt.allocPrint(allocator, "(no memory #{d})\n\n", .{id});
+            defer allocator.free(miss);
+            try out.appendSlice(allocator, miss);
+            continue;
+        };
+        try owned.append(allocator, detail);
+        const d = &owned.items[owned.items.len - 1];
+        found += 1;
+        const block = try std.fmt.allocPrint(allocator, "### #{d} [{s}/{s}] {s}\n{s}\n\n", .{
+            d.id, d.wing, d.room, d.source_path, d.content,
+        });
+        defer allocator.free(block);
+        try out.appendSlice(allocator, block);
+        try hits_list.append(allocator, .{
+            .id = d.id,
+            .wing = d.wing,
+            .room = d.room,
+            .source = d.source_path,
+            .kind = d.kind,
+            .content = d.content,
+        });
+    }
+
+    if (found == 0 and out.items.len == 0) {
+        return .{ .text = try allocator.dupe(u8, "No memories found for those ids.") };
+    }
+    if (found == 0) {
+        return .{ .text = try out.toOwnedSlice(allocator) };
+    }
+
+    const structured = try std.json.Stringify.valueAlloc(allocator, .{ .results = hits_list.items }, .{});
+    errdefer allocator.free(structured);
+    return .{ .text = try out.toOwnedSlice(allocator), .structured = structured };
+}
+
+/// Accept `id` (int) and/or `ids` (array of int). Caps at ids_buf.len.
+fn collectIds(args: ?std.json.Value, ids_buf: []i64) usize {
+    const a = args orelse return 0;
+    if (a != .object) return 0;
+    var n: usize = 0;
+    if (a.object.get("ids")) |v| {
+        if (v == .array) {
+            for (v.array.items) |item| {
+                if (n >= ids_buf.len) break;
+                const id: ?i64 = switch (item) {
+                    .integer => |i| i,
+                    .float => |f| if (f >= -1.0e18 and f <= 1.0e18) @intFromFloat(f) else null,
+                    .string => |s| std.fmt.parseInt(i64, s, 10) catch null,
+                    else => null,
+                };
+                if (id) |i| {
+                    ids_buf[n] = i;
+                    n += 1;
+                }
+            }
+        }
+    }
+    if (getInt(args, "id")) |single| {
+        // Avoid duplicate if already in list.
+        var exists = false;
+        for (ids_buf[0..n]) |x| {
+            if (x == single) {
+                exists = true;
+                break;
+            }
+        }
+        if (!exists and n < ids_buf.len) {
+            ids_buf[n] = single;
+            n += 1;
+        }
+    }
+    return n;
 }
 
 // ── Prompts: prompts/get ──
@@ -400,9 +661,10 @@ fn handlePromptGet(allocator: Allocator, io: std.Io, id: std.json.Value, params:
         const query = getStr(args, "query") orelse "";
         description = "Search long-term local memory and answer from it";
         text = try std.fmt.allocPrint(allocator,
-            \\Use the `memory_search` tool to recall everything relevant to the query below, then
-            \\answer using what you find. Cite the source of each memory you rely on. If memory has
-            \\nothing relevant, say so plainly rather than guessing.
+            \\Use progressive disclosure on local memory:
+            \\1. `memory_search` with the query (default detail=index — compact hits).
+            \\2. `memory_get` with the promising id(s) for full verbatim text.
+            \\Answer using what you find; cite drawer ids/sources. If nothing relevant, say so.
             \\
             \\Query:
             \\
@@ -429,7 +691,7 @@ fn handlePromptGet(allocator: Allocator, io: std.Io, id: std.json.Value, params:
 
 // ── Resources: resources/read ──
 
-fn handleResourceRead(allocator: Allocator, database: *db.Database, io: std.Io, id: std.json.Value, params: ?std.json.Value) !void {
+fn handleResourceRead(allocator: Allocator, database: *db.Database, cfg: *const config.Config, io: std.Io, id: std.json.Value, params: ?std.json.Value) !void {
     const p = params orelse return sendError(allocator, io, id, -32602, "missing params");
     if (p != .object) return sendError(allocator, io, id, -32602, "missing params");
     const uri = switch (p.object.get("uri") orelse return sendError(allocator, io, id, -32602, "missing uri")) {
@@ -440,7 +702,8 @@ fn handleResourceRead(allocator: Allocator, database: *db.Database, io: std.Io, 
         return sendError(allocator, io, id, -32602, "unknown resource uri");
     }
 
-    const brief = try wakeup.generate(database, null, allocator);
+    const wing: ?[]const u8 = if (!std.mem.eql(u8, cfg.default_wing, "default")) cfg.default_wing else null;
+    const brief = try wakeup.generate(database, wing, allocator);
     defer allocator.free(brief);
 
     const out = try std.json.Stringify.valueAlloc(allocator, .{

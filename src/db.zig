@@ -15,7 +15,11 @@ pub const c = @cImport({
 
 /// Bump when the on-disk schema changes; add a migration branch in
 /// `migrateSchema` for each step. Persisted via SQLite's `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i64 = 1;
+/// v2: FTS5 full-text index for hybrid keyword + vector search.
+/// v3: facts, profile_entries, drawer kind/tier/lifecycle columns.
+/// v4: memory clusters for hierarchical / coarse-to-fine recall.
+/// v5: TurboQuant-inspired online quantized vectors (vec_quant).
+pub const SCHEMA_VERSION: i64 = 5;
 
 pub const Sqlite3 = c.sqlite3;
 pub const Stmt = c.sqlite3_stmt;
@@ -112,12 +116,170 @@ pub const Database = struct {
             );
             return;
         }
-        // Future: `if (current < 2) { ...migrate... }` etc.
+        // v1 → v2: FTS5 index for hybrid keyword search (identifiers, error codes).
+        if (current < 2) {
+            self.ensureFtsIndex();
+            // Backfill from existing drawers so upgrades regain keyword recall.
+            self.exec(
+                \\INSERT INTO drawers_fts(rowid, content, source_path)
+                \\SELECT id, content, COALESCE(source_path, '') FROM drawers
+                \\WHERE id NOT IN (SELECT rowid FROM drawers_fts)
+            );
+        }
+        // v2 → v3: semantic core (facts, profiles) + drawer lifecycle columns.
+        if (current < 3) {
+            self.ensureV3Tables();
+            self.ensureDrawerLifecycleColumns();
+            // Backfill kind from source_type / room name heuristics.
+            self.exec(
+                \\UPDATE drawers SET kind = CASE
+                \\  WHEN source_type IN ('memory', 'agent') THEN 'memory'
+                \\  WHEN source_type IN ('decision') THEN 'decision'
+                \\  WHEN source_type IN ('conversation', 'precompact-autosave', 'session') THEN 'episode'
+                \\  WHEN source_type IN ('import') THEN 'memory'
+                \\  ELSE 'document'
+                \\END
+                \\WHERE kind IS NULL OR kind = '' OR kind = 'document'
+            );
+            // Re-run with room-based upgrades for decisions (rooms named decisions, etc.)
+            self.exec(
+                \\UPDATE drawers SET kind = 'decision'
+                \\WHERE id IN (
+                \\  SELECT d.id FROM drawers d
+                \\  JOIN rooms r ON r.id = d.room_id
+                \\  WHERE lower(r.name) IN ('decisions', 'decision', 'architecture', 'adr')
+                \\)
+            );
+        }
+        // v3 → v4: hierarchical clusters.
+        if (current < 4) {
+            self.ensureClusterTable();
+        }
+        // v4 → v5: online quantized embeddings for cold/warm storage.
+        if (current < 5) {
+            self.ensureVecQuantTable();
+        }
         if (current != SCHEMA_VERSION) {
             var buf: [64]u8 = undefined;
             const sql = std.fmt.bufPrintZ(&buf, "PRAGMA user_version = {d}", .{SCHEMA_VERSION}) catch return;
             self.exec(sql);
         }
+    }
+
+    /// Tables introduced in schema v3. Safe to call repeatedly (IF NOT EXISTS).
+    pub fn ensureV3Tables(self: *Database) void {
+        self.exec(
+            \\CREATE TABLE IF NOT EXISTS facts (
+            \\  id INTEGER PRIMARY KEY AUTOINCREMENT,
+            \\  wing_id INTEGER NOT NULL REFERENCES wings(id) ON DELETE CASCADE,
+            \\  subject TEXT NOT NULL,
+            \\  predicate TEXT NOT NULL DEFAULT 'states',
+            \\  object TEXT NOT NULL,
+            \\  confidence REAL DEFAULT 1.0,
+            \\  trust TEXT DEFAULT 'agent',
+            \\  source_drawer_id INTEGER,
+            \\  supersedes_id INTEGER,
+            \\  valid_from INTEGER DEFAULT (strftime('%s','now')),
+            \\  valid_until INTEGER,
+            \\  expires_at INTEGER,
+            \\  created_at INTEGER DEFAULT (strftime('%s','now'))
+            \\)
+        );
+        self.exec("CREATE INDEX IF NOT EXISTS idx_facts_wing ON facts(wing_id)");
+        self.exec("CREATE INDEX IF NOT EXISTS idx_facts_subj ON facts(subject)");
+        self.exec("CREATE INDEX IF NOT EXISTS idx_facts_active ON facts(wing_id, valid_until)");
+
+        self.exec(
+            \\CREATE TABLE IF NOT EXISTS profile_entries (
+            \\  id INTEGER PRIMARY KEY AUTOINCREMENT,
+            \\  wing_id INTEGER NOT NULL REFERENCES wings(id) ON DELETE CASCADE,
+            \\  key TEXT NOT NULL,
+            \\  value TEXT NOT NULL,
+            \\  source_fact_id INTEGER,
+            \\  valid_from INTEGER DEFAULT (strftime('%s','now')),
+            \\  valid_until INTEGER,
+            \\  created_at INTEGER DEFAULT (strftime('%s','now'))
+            \\)
+        );
+        self.exec("CREATE INDEX IF NOT EXISTS idx_profile_wing ON profile_entries(wing_id)");
+        self.exec("CREATE INDEX IF NOT EXISTS idx_profile_active ON profile_entries(wing_id, valid_until)");
+        self.ensureClusterTable();
+    }
+
+    pub fn ensureClusterTable(self: *Database) void {
+        self.exec(
+            \\CREATE TABLE IF NOT EXISTS clusters (
+            \\  id INTEGER PRIMARY KEY AUTOINCREMENT,
+            \\  wing_id INTEGER NOT NULL REFERENCES wings(id) ON DELETE CASCADE,
+            \\  summary TEXT NOT NULL,
+            \\  member_ids TEXT NOT NULL DEFAULT '',
+            \\  drawer_id INTEGER,
+            \\  created_at INTEGER DEFAULT (strftime('%s','now'))
+            \\)
+        );
+        self.exec("CREATE INDEX IF NOT EXISTS idx_clusters_wing ON clusters(wing_id)");
+    }
+
+    /// TurboQuant-style packed embeddings (online, no PQ train).
+    pub fn ensureVecQuantTable(self: *Database) void {
+        self.exec(
+            \\CREATE TABLE IF NOT EXISTS vec_quant (
+            \\  id INTEGER PRIMARY KEY,
+            \\  nbits INTEGER NOT NULL DEFAULT 4,
+            \\  codes BLOB NOT NULL,
+            \\  residual_signs BLOB,
+            \\  residual_norm REAL DEFAULT 0
+            \\)
+        );
+    }
+
+    /// Additive columns on drawers for kind/tier/lifecycle. SQLite ignores
+    /// duplicate ALTER when we check pragma first... actually ALTER fails if
+    /// column exists. We try each and ignore errors via exec (prints warn).
+    /// Safer: check table_info.
+    pub fn ensureDrawerLifecycleColumns(self: *Database) void {
+        if (!self.columnExists("drawers", "kind")) {
+            self.exec("ALTER TABLE drawers ADD COLUMN kind TEXT DEFAULT 'document'");
+        }
+        if (!self.columnExists("drawers", "tier")) {
+            self.exec("ALTER TABLE drawers ADD COLUMN tier TEXT DEFAULT 'hot'");
+        }
+        if (!self.columnExists("drawers", "access_count")) {
+            self.exec("ALTER TABLE drawers ADD COLUMN access_count INTEGER DEFAULT 0");
+        }
+        if (!self.columnExists("drawers", "last_access")) {
+            self.exec("ALTER TABLE drawers ADD COLUMN last_access INTEGER");
+        }
+        if (!self.columnExists("drawers", "supersedes_id")) {
+            self.exec("ALTER TABLE drawers ADD COLUMN supersedes_id INTEGER");
+        }
+        if (!self.columnExists("drawers", "expires_at")) {
+            self.exec("ALTER TABLE drawers ADD COLUMN expires_at INTEGER");
+        }
+    }
+
+    fn columnExists(self: *Database, table: []const u8, col: []const u8) bool {
+        // PRAGMA table_info returns rows; we scan for name match.
+        var sql_buf: [128]u8 = undefined;
+        const sql = std.fmt.bufPrint(&sql_buf, "PRAGMA table_info({s})", .{table}) catch return false;
+        const stmt = self.prepare(sql) orelse return false;
+        defer finalize(stmt);
+        while (step(stmt) == SQLITE_ROW) {
+            const name = columnText(stmt, 1) orelse continue;
+            if (std.mem.eql(u8, name, col)) return true;
+        }
+        return false;
+    }
+
+    /// Create the FTS5 virtual table if missing. Safe to call repeatedly.
+    pub fn ensureFtsIndex(self: *Database) void {
+        self.exec(
+            \\CREATE VIRTUAL TABLE IF NOT EXISTS drawers_fts USING fts5(
+            \\  content,
+            \\  source_path,
+            \\  tokenize = 'porter unicode61'
+            \\)
+        );
     }
 
     // ── Schema Creation ──
@@ -231,6 +393,15 @@ pub const Database = struct {
             \\  completed_at INTEGER
             \\)
         );
+
+        // ── FTS5 full-text index (hybrid keyword + vector search) ──
+        self.ensureFtsIndex();
+
+        // ── Semantic core (facts + profiles) + drawer lifecycle + clusters ──
+        self.ensureV3Tables();
+        self.ensureDrawerLifecycleColumns();
+        self.ensureClusterTable();
+        self.ensureVecQuantTable();
 
         // Stamp/upgrade the schema version last, once all tables exist.
         self.migrateSchema();

@@ -2,7 +2,7 @@
 // memxt/hooks.zig — Claude Code hook protocol (real, 2026)
 //
 // Reads the hook event JSON on stdin, performs a side effect, and writes
-// the documented JSON response on stdout. Two events matter for memory:
+// the documented JSON response on stdout. Events that matter for memory:
 //
 //   SessionStart  → inject the wake-up brief into the session's context
 //                   (additionalContext). Fires again after compaction with
@@ -10,6 +10,12 @@
 //   PreCompact    → context is about to be summarized away. Read the live
 //                   transcript and SAVE the recent tail as a memory so it
 //                   survives — genuine auto-save, not a nag.
+//   Stop          → session turn ended. Autosave transcript tail (verbatim,
+//                   local MiniLM embed only — no cloud LLM compression).
+//                   Content-hash dedup avoids flooding the palace.
+//
+// Deliberately NOT PostToolUse-every-call: that is claude-mem's model and
+// needs an AI compressor. We keep zero-network memory ops and denser stores.
 //
 // We accept both the real Claude Code field (`hook_event_name`) and the
 // legacy `hook` field, and match event names case/spelling-liberally.
@@ -35,9 +41,11 @@ const c = @cImport({
 const STDIN_FD: c_int = 0;
 const STDOUT_FD: c_int = 1;
 
-// Cap how much recent conversation we save before compaction.
+// Cap how much recent conversation we save (PreCompact keeps more; Stop less).
 const MAX_SAVE_CHARS: usize = 6000;
+const MAX_STOP_SAVE_CHARS: usize = 3500;
 const MAX_TRANSCRIPT_BYTES: usize = 4 * 1024 * 1024;
+const MIN_SAVE_CHARS: usize = 80;
 
 pub fn processHook(database: *db.Database, cfg: *const config.Config, allocator: Allocator) !void {
     var input_buf: [1024 * 1024]u8 = undefined;
@@ -62,21 +70,38 @@ pub fn processHook(database: *db.Database, cfg: *const config.Config, allocator:
     const event = eventName(root);
 
     if (isEvent(event, "SessionStart", "session-start")) {
-        try handleSessionStart(database, allocator);
+        try handleSessionStart(database, cfg, allocator);
     } else if (isEvent(event, "PreCompact", "precompact")) {
-        handlePreCompact(database, cfg, root, allocator);
+        handleTranscriptSave(database, cfg, root, allocator, .{
+            .source = "precompact-autosave",
+            .max_chars = MAX_SAVE_CHARS,
+            .min_chars = 40,
+            .pin_decisions = true,
+        });
         writeStdout("{}\n"); // don't block compaction
-    } else if (isEvent(event, "Stop", "stop")) {
-        // Saving on every Stop is noisy; we rely on PreCompact + the agent
-        // calling memory_store. Continue silently.
+    } else if (isEvent(event, "Stop", "stop") or isEvent(event, "SessionEnd", "session-end")) {
+        // Autosave without cloud LLM: verbatim tail + local embed. Hash-dedup
+        // inside insertDrawer means repeated Stop on the same tail is free.
+        handleTranscriptSave(database, cfg, root, allocator, .{
+            .source = "session-stop",
+            .max_chars = MAX_STOP_SAVE_CHARS,
+            .min_chars = MIN_SAVE_CHARS,
+            .pin_decisions = true,
+        });
         writeStdout("{}\n");
     } else {
         writeStdout("{}\n");
     }
 }
 
-fn handleSessionStart(database: *db.Database, allocator: Allocator) !void {
-    const context = wakeup.generate(database, null, allocator) catch {
+fn handleSessionStart(database: *db.Database, cfg: *const config.Config, allocator: Allocator) !void {
+    // Scope the brief to the project-derived default wing so sessions don't
+    // blend unrelated projects. Fall back to all wings only when still "default".
+    const wing: ?[]const u8 = if (!std.mem.eql(u8, cfg.default_wing, "default"))
+        cfg.default_wing
+    else
+        null;
+    const context = wakeup.generate(database, wing, allocator) catch {
         writeStdout("{}\n");
         return;
     };
@@ -95,27 +120,67 @@ fn handleSessionStart(database: *db.Database, allocator: Allocator) !void {
     writeStdout(response);
 }
 
-fn handlePreCompact(database: *db.Database, cfg: *const config.Config, root: std.json.ObjectMap, allocator: Allocator) void {
+const SaveOpts = struct {
+    source: []const u8,
+    max_chars: usize,
+    min_chars: usize,
+    pin_decisions: bool,
+};
+
+fn handleTranscriptSave(
+    database: *db.Database,
+    cfg: *const config.Config,
+    root: std.json.ObjectMap,
+    allocator: Allocator,
+    opts: SaveOpts,
+) void {
     const tpath = strField(root, "transcript_path") orelse return;
 
-    const tail = extractTranscriptTail(tpath, allocator) catch return orelse return;
+    const tail = extractTranscriptTail(tpath, opts.max_chars, allocator) catch return orelse return;
     defer allocator.free(tail);
-    if (tail.len < 40) return; // nothing worth saving
+    if (tail.len < opts.min_chars) return;
 
-    // Embeddings make the saved tail semantically searchable later. Load the
-    // model lazily here (PreCompact is rare) so SessionStart stays instant.
+    // Local MiniLM only — never call a cloud LLM to "compress" the session.
     embedder.initGlobal(cfg.model_path) catch {};
 
     var pal = palace.Palace.init(database, allocator);
-    _ = miner.storeMemory(&pal, tail, cfg.default_wing, "sessions", "precompact-autosave", allocator) catch return;
+    // Episodic: room=sessions → kind=episode; storeMemory also runs heuristic
+    // fact extract. Content-hash dedup skips identical tails.
+    _ = miner.storeMemory(&pal, tail, cfg.default_wing, "sessions", opts.source, allocator) catch return;
+
+    if (!opts.pin_decisions) return;
+    if (looksLikeDecision(tail)) {
+        const snippet_len = @min(tail.len, 800);
+        const snippet = tail[tail.len - snippet_len ..];
+        const src_tag = if (std.mem.eql(u8, opts.source, "session-stop"))
+            "stop-decision"
+        else
+            "precompact-decision";
+        _ = miner.storeMemory(&pal, snippet, cfg.default_wing, "decisions", src_tag, allocator) catch {};
+    }
+}
+
+fn looksLikeDecision(tail: []const u8) bool {
+    const needles = [_][]const u8{
+        "we use ",   "We use ",
+        "we chose ", "We chose ",
+        "don't use ", "do not use ",
+        "prefer ",   "decided to ",
+        "going with ", "will use ",
+    };
+    for (needles) |n| {
+        if (std.mem.indexOf(u8, tail, n) != null) return true;
+    }
+    return false;
 }
 
 // ── Transcript extraction ──
 
-/// Read the JSONL transcript and return the most recent ~MAX_SAVE_CHARS of
+/// Read the JSONL transcript and return the most recent ~max_chars of
 /// human-readable conversation text (user prompts + assistant text blocks),
-/// oldest-to-newest. Caller owns the result.
-fn extractTranscriptTail(path: []const u8, allocator: Allocator) !?[]u8 {
+/// oldest-to-newest. Caller owns the result. Tool calls/results are skipped
+/// so episodes stay signal-dense without an LLM compressor.
+fn extractTranscriptTail(path: []const u8, max_chars: usize, allocator: Allocator) !?[]u8 {
     const path_z = try allocator.dupeZ(u8, path);
     defer allocator.free(path_z);
 
@@ -161,7 +226,7 @@ fn extractTranscriptTail(path: []const u8, allocator: Allocator) !?[]u8 {
     if (pieces.items.len == 0) return null;
 
     // Keep only the tail.
-    const start = if (pieces.items.len > MAX_SAVE_CHARS) pieces.items.len - MAX_SAVE_CHARS else 0;
+    const start = if (pieces.items.len > max_chars) pieces.items.len - max_chars else 0;
     return try allocator.dupe(u8, pieces.items[start..]);
 }
 

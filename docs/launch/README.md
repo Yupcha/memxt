@@ -1,29 +1,82 @@
-# Launch kit
+# Launch pack — memxt
 
-Assets for launching memxt.
+Ship as **coding-agent memory** (Claude Code first), not as “Zig binary.”
 
-- **`show-hn.md`** — the launch post (Show HN / r/LocalLLaMA / r/mcp). Builder voice,
-  reproducible numbers, no superlatives. Includes title options.
-- **`demo.tape`** — [VHS](https://github.com/charmbracelet/vhs) script that renders
-  `../../assets/demo.gif`. Run from the repo root:
+## One-liner pitch
 
-  ```bash
-  brew install vhs                 # needs ttyd + ffmpeg (pulled in)
-  curl -fsSL .../install.sh | bash # the demo uses the installed binary + model
-  vhs docs/launch/demo.tape
-  ```
+> Claude Code forgets your decisions after compact. memxt doesn’t. Local MCP + hooks, shared across Codex/Cursor/Grok. Nothing leaves your machine — no memory LLM.
 
-- **`demo/sample-project/`** — the tiny project the demo mines (clear, recall-worthy
-  decisions). Self-contained and reproducible.
+## Assets
 
-## Launch sequence (from the strategy)
+| File | Use |
+|--|--|
+| [`show-hn.md`](./show-hn.md) | Show HN / Reddit post draft |
+| [`demo.tape`](./demo.tape) | VHS tape for demo GIF re-record |
+| [`demo/sample-project/`](./demo/sample-project/) | Tiny repo for live demos |
+| [`../../packaging/awesome-entries.md`](../../packaging/awesome-entries.md) | Awesome-list PR bodies |
+| [`../BENCHMARKS_CONTINUITY.md`](../BENCHMARKS_CONTINUITY.md) | Continuity bench |
+| [`../TOKEN_SAVINGS.md`](../TOKEN_SAVINGS.md) | Measured token savings |
+| [`../../scripts/bench-continuity.sh`](../../scripts/bench-continuity.sh) | Run continuity |
+| [`../../scripts/bench-scale.sh`](../../scripts/bench-scale.sh) | Run scale + quant |
 
-1. Publish `show-hn.md` as a post on your own domain (the benchmark/demo *is* the launch).
-2. **Show HN**, Tue–Thu 9–11am ET. First comment = problem → why Zig → reproduce-it link. Camp the thread.
-3. Same day: **r/LocalLLaMA** + **r/mcp** (lead with the GIF, builder voice).
-4. Timed **X/Twitter** thread: GIF first, benchmark image second.
-5. PRs into **awesome-mcp-servers** ("Knowledge & Memory"), **awesome-claude-code**, **awesome-zig**.
-6. Newsletter pitches: Latent Space, TLDR AI, Simon Willison.
+## Pre-flight checklist
 
-Top 3 things that would sink it: unreproducible benchmarks, corporate/superlative voice,
-a broken `curl | sh` on a clean box during the spike. Test the installer on a fresh VM first.
+```bash
+# 1. Local build + benches
+zig build --release=fast
+./scripts/bench-continuity.sh          # expect SCORE 6/6
+N=200 HOT_BUDGET=50 ./scripts/bench-scale.sh
+
+# 2. Version + tag
+# build.zig.zon version must match release tag (e.g. 0.3.0 → v0.3.0)
+git push origin main
+git tag v0.3.0 && git push origin v0.3.0   # triggers .github/workflows/release.yml
+
+# 3. Wait for GitHub Release assets (4 tarballs)
+gh release view v0.3.0
+
+# 4. Fresh install smoke (uses published tarball)
+curl -fsSL https://raw.githubusercontent.com/Yupcha/memxt/main/install.sh | bash
+~/.memxt/bin/memxt init
+~/.memxt/bin/memxt wake-up
+# MCP tools: memory_search (index) → memory_get; hooks: SessionStart/PreCompact/Stop
+
+# 5. GitHub About box
+# Description: Local long-term memory for Claude Code & coding agents. MCP + hooks. Nothing leaves your machine.
+# Topics: claude-code, mcp, ai-memory, local-first, agent-memory
+```
+
+## Channels (order)
+
+1. **Show HN** — `show-hn.md` title + body (only after install smoke is green)
+2. **awesome-claude-code** — first PR
+3. **awesome-mcp-servers** — Knowledge & Memory
+4. **r/ClaudeAI**, **r/LocalLLaMA**, **r/mcp**
+5. X/Twitter: SessionStart wake-up + search → get GIF
+
+## Do / don’t
+
+| Do | Don’t |
+|--|--|
+| Lead with Claude Code amnesia | Lead with Zig |
+| Show local + multi-agent same DB | Claim cloud SOTA LoCoMo |
+| Contrast claude-mem honestly (no memory LLM) | Trash competitors |
+| Link continuity + token savings | Fake placeholder-vector numbers |
+| Mention `adopt --write` + progressive disclosure | Promise Drive/Gmail connectors |
+
+## Scorecard (v0.3.0 target)
+
+| Area | Ready when |
+|--|--|
+| Core product | Continuity 6/6 + MCP search/get |
+| README story | Claude-first + vs claude-mem |
+| Install path | `curl \| bash` hits **this** release |
+| Version | `build.zig.zon` == release tag |
+| Launch copy | show-hn + awesome refreshed |
+| GitHub About | Description matches README pitch |
+
+## Post-launch metrics
+
+- Continuity SCORE 6/6 green in CI (optional later)
+- Stars / plugin installs
+- Issues: install, model path, harness wire-up, wing collisions

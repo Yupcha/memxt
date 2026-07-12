@@ -16,6 +16,8 @@ const Palace = palace_mod.Palace;
 pub const MineStats = struct {
     files_processed: u32 = 0,
     drawers_created: u32 = 0,
+    /// Chunks skipped because content_hash already exists (incremental re-mine).
+    chunks_skipped: u32 = 0,
     files_skipped: u32 = 0,
     bytes_processed: u64 = 0,
     /// Chunks that failed to embed or insert. Non-zero means some content was
@@ -122,8 +124,18 @@ fn processFileConcurrently(
     }
 
     var drawers_added: u32 = 0;
+    var chunks_skipped: u32 = 0;
     var errors: u32 = 0;
     for (chunks, 0..) |chunk, i| {
+        // Incremental re-mine: skip embed+insert when this exact chunk is already stored.
+        var hash_buf: [64]u8 = undefined;
+        if (palace_mod.Palace.contentHashHex(chunk, &hash_buf)) |hex| {
+            if (palace.hasContentHash(hex)) {
+                chunks_skipped += 1;
+                continue;
+            }
+        } else |_| {}
+
         const embedding = embed.embed(chunk, allocator) catch |err| {
             std.debug.print("warn: embed failed for {s} chunk {d}: {s}\n", .{ entry_path, i, @errorName(err) });
             errors += 1;
@@ -141,6 +153,7 @@ fn processFileConcurrently(
     }
 
     _ = @atomicRmw(u32, &stats.drawers_created, .Add, drawers_added, .monotonic);
+    _ = @atomicRmw(u32, &stats.chunks_skipped, .Add, chunks_skipped, .monotonic);
     _ = @atomicRmw(u32, &stats.errors, .Add, errors, .monotonic);
     _ = @atomicRmw(u32, &stats.files_processed, .Add, 1, .monotonic);
 }
@@ -175,6 +188,14 @@ pub fn mineFile(
     }
 
     for (chunks, 0..) |chunk, i| {
+        var hash_buf: [64]u8 = undefined;
+        if (palace_mod.Palace.contentHashHex(chunk, &hash_buf)) |hex| {
+            if (palace.hasContentHash(hex)) {
+                stats.chunks_skipped += 1;
+                continue;
+            }
+        } else |_| {}
+
         const embedding = embed.embed(chunk, allocator) catch |err| {
             std.debug.print("warn: embed failed for {s} chunk {d}: {s}\n", .{ file_path, i, @errorName(err) });
             stats.errors += 1;
@@ -194,6 +215,7 @@ pub fn mineFile(
 
 /// Store a single in-memory snippet (a decision, quote, or code block) as one
 /// drawer. Used by the MCP `store` tool and the auto-save hooks — no file I/O.
+/// Also extracts heuristic facts → profile + knowledge graph.
 pub fn storeMemory(
     palace: *Palace,
     content: []const u8,
@@ -202,11 +224,35 @@ pub fn storeMemory(
     source: []const u8,
     allocator: Allocator,
 ) !i64 {
+    const facts = @import("facts.zig");
+
     const wing_id = try palace.createWing(wing_name, "", "memory");
     const room_id = try palace.createRoom(wing_id, room_name, "");
+    const kind = palace_mod.Palace.deriveKind("memory", room_name);
+    const source_type: []const u8 = if (std.mem.eql(u8, kind, "decision")) "decision" else "memory";
+    const trust: []const u8 = if (std.mem.eql(u8, kind, "decision")) "decision" else "agent";
+
     const embedding = embed.embed(content, allocator) catch &[_]f32{};
     defer if (embedding.len > 0) allocator.free(embedding);
-    return palace.insertDrawer(room_id, content, source, "memory", 0, embedding);
+
+    const drawer_id = try palace.insertDrawerKind(
+        room_id,
+        content,
+        source,
+        source_type,
+        0,
+        embedding,
+        kind,
+        null,
+    );
+
+    // Semantic core: extract facts (best-effort; never fails the store).
+    if (facts.extractFromText(content, allocator)) |extracted| {
+        defer facts.freeExtracted(extracted, allocator);
+        _ = facts.ingestExtracted(palace.database, wing_id, wing_name, drawer_id, extracted, trust, allocator) catch {};
+    } else |_| {}
+
+    return drawer_id;
 }
 
 /// Mine a conversation file (JSON/JSONL chat export)

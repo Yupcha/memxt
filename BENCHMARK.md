@@ -33,7 +33,29 @@ the model at all, which is why it's 10 ms and runs on every session start.
 | Runtime dependencies | none (no Python, no Docker, no external vector DB) |
 | Network calls at query time | none |
 
-## 3. Retrieval quality (sanity)
+## 3. Coding Continuity Bench
+
+Agent-facing: store engineering decisions, query with paraphrases, check wake-up/profile.
+
+```bash
+./scripts/bench-continuity.sh
+# expect SCORE 6/6
+```
+
+Docs → [`docs/BENCHMARKS_CONTINUITY.md`](./docs/BENCHMARKS_CONTINUITY.md).
+
+## 4. Scale + TurboQuant cold storage
+
+```bash
+N=500 HOT_BUDGET=100 ./scripts/bench-scale.sh
+# reports seed rate, warm search, dream demote→quant, post-dream search, wake-up
+```
+
+On a sample run (N=80, budget=20, Apple Silicon): seed ~290 drawers/s (MCP warm model),
+warm search ~2 ms, dream ~0.02 s, **62 drawers quantized to 4-bit**, hot vectors capped at
+budget, wake-up ~0.1 ms, DB ~1.8 MB.
+
+## 5. Retrieval quality (sanity)
 
 On a 4-topic corpus (biology / coffee / algorithms / history) with paraphrased queries
 that share no keywords with the stored text, top-1 retrieval is correct 7/7 — e.g.

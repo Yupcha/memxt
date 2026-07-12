@@ -5,37 +5,67 @@ description: Use the local memxt memory to recall past decisions, code, and cont
 
 # Using memxt memory
 
-You have a persistent, local memory palace via the `memory` MCP server. It survives
-across sessions and never leaves this machine. Four tools:
+You have a persistent, **local** memory palace via the `memory` MCP server.
+It survives across sessions. Nothing leaves this machine. No cloud LLM is used
+to compress or store memory (unlike claude-mem-style pipelines).
 
-- **`memory_search`** — semantic recall. Call this *before* answering any question
-  about prior work, past decisions, project conventions, or "how did we do X". Don't
-  assume you don't know — check memory first.
-- **`memory_store`** — persist something worth remembering: a decision and its
-  rationale, a non-obvious constraint, a key snippet, a fact about the user or project.
-  Store it verbatim and concise.
-- **`memory_wake_up`** — load the compact continuity brief (you also get this
-  automatically at session start).
-- **`memory_stats`** — how much is stored.
+## Progressive disclosure (save tokens)
+
+Always prefer this 2-step flow:
+
+1. **`memory_search`** — default `detail=index` returns compact hits
+   (`#id`, wing/room, source, ~100-char snippet). Cheap.
+2. **`memory_get`** — pass promising `id` or `ids` to load **full verbatim**
+   bodies only for what you need.
+
+Do **not** pass `detail=full` unless the query is tiny or you already know you
+need every body (wastes context).
+
+Example:
+
+```
+memory_search({ query: "cart limit", limit: 5 })
+→ #42 decisions/… "Cart is capped at 37…"
+memory_get({ ids: [42] })
+→ full drawer text
+```
+
+## Other tools
+
+- **`memory_wake_up`** — continuity brief (also auto-injected at SessionStart).
+- **`memory_profile`** — stable project facts; no embedding model.
+- **`memory_store`** — persist a decision / constraint / fact (verbatim).
+  Prefer `room: "decisions"` for architecture choices.
+- **`memory_forget`** — delete by drawer id.
+- **`memory_stats`** / **`memory_dream`** — health / consolidation.
 
 ## When to recall
 
 Before answering "what / why / how did we …", "last time", "remember when",
-"our convention for …", or anything that depends on history, call `memory_search`
-with a natural-language query. Cite what you find.
+"our convention for …", or anything that depends on history:
+
+1. `memory_search` (index)
+2. `memory_get` on relevant ids
+3. Cite `#id` / source when you use a memory
 
 ## When to store
 
 After a real decision ("let's use X because Y"), a discovered constraint, a
-correction the user makes, or a fact you'd want next session, call `memory_store`.
-Prefer one crisp memory per fact. Good memories are specific and self-contained:
+correction the user makes, or a fact you'd want next session, call
+`memory_store`. One crisp memory per fact.
+
+Good:
 
 > "Cart is capped at 37 items because the Brightwell ERP rejects larger orders (0x5C error)."
 
-not "we talked about the cart."
+Bad: "we talked about the cart."
+
+**Hooks already autosave** session tails on Stop + PreCompact (local, verbatim).
+Still call `memory_store` for **important decisions** so they land in the
+profile, not only as a long episode.
 
 ## Principles
 
-- Memory is verbatim — never paraphrase a stored fact into something false.
-- Local-first: all recall/embedding happens on-device; nothing is uploaded.
-- When unsure whether something is remembered, search — it's cheap.
+- Memory is **verbatim** — never invent from a fuzzy summary.
+- **Local-first**: embeddings + search on-device; zero network at query time.
+- When unsure, **search** — index is cheap; full get is on demand.

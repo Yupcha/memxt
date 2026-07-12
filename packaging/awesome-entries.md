@@ -1,41 +1,40 @@
 # Awesome-list submissions
 
-Ready-to-submit entries for memxt. The MCP one is the strongest fit and
-worth submitting first; the rest land best right after the Show HN, when there's
-some traction (many awesome-lists expect a little maturity).
+Pitch **Claude Code / coding agents / local memory**. Submit in this order **after** `v0.3.0` is live on GitHub Releases.
 
-## 1. punkpeye/awesome-mcp-servers → "🧠 Knowledge & Memory"
-
-Insert alphabetically (by `author/name`):
+## 1. awesome-claude-code (highest priority)
 
 ```
-- [Yupcha/memxt](https://github.com/Yupcha/memxt) 🏠 🍎 🐧 - Local-first long-term memory for AI coding agents in a single static Zig binary (llama.cpp + sqlite-vec). On-device embeddings, semantic recall, verbatim storage — no cloud, no vector DB, nothing leaves your machine. Ships a Claude Code plugin (memory tools + session hooks).
+- [memxt](https://github.com/Yupcha/memxt) - Persistent local memory for Claude Code: MCP tools + SessionStart/PreCompact/Stop hooks, progressive search (`memory_search` → `memory_get`), project profiles, hybrid FTS+vector, localhost monitor. Shared palace for Codex/Cursor/Grok. No cloud memory LLM.
 ```
 
-Legend: 🏠 local service · 🍎 macOS · 🐧 Linux.
-
-## 2. hesreallyhim/awesome-claude-code → tooling / MCP section
+## 2. punkpeye/awesome-mcp-servers → Knowledge & Memory
 
 ```
-- [memxt](https://github.com/Yupcha/memxt) - Persistent, local-first memory for Claude Code: an MCP memory server plus SessionStart/PreCompact hooks that auto-load context at session start and auto-save before compaction. One static binary, fully on-device.
+- [Yupcha/memxt](https://github.com/Yupcha/memxt) 🏠 🍎 🐧 - Long-term memory for Claude Code and coding agents. Local MCP + session hooks; progressive disclosure; hybrid vector/FTS/facts; dream consolidation with 4-bit cold vectors; monitor UI on localhost. Nothing leaves your machine.
 ```
 
-## 3. catppuccin/awesome-zig (or zigcc/awesome-zig) → Applications / Tools
+## 3. Agent / AI memory lists
 
 ```
-- [memxt](https://github.com/Yupcha/memxt) - Local-first long-term memory engine for AI coding agents. Statically links llama.cpp + sqlite-vec into one binary; MCP server + Claude Code plugin.
+- [memxt](https://github.com/Yupcha/memxt) - Local-first memory for agentic coding tools (Claude Code, Codex, Cursor, Grok CLI). Continuity bench 6/6; ~72% fewer tokens vs doc dump; adopt --write; serve UI; multi-project wings in one palace.
 ```
 
-## How to submit (per list)
+## PR body template
 
-```bash
-gh repo fork <owner>/<repo> --clone --remote
-cd <repo>
-# edit the README, add the entry in the right section
-git checkout -b add-memxt
-git commit -am "Add memxt (local-first agent memory)"
-git push -u origin add-memxt
-gh pr create --repo <owner>/<repo> --title "Add memxt" --body "..."
 ```
+## memxt
 
-Timing: submit #1 now; submit #2 and #3 right after the Show HN front-pages.
+Local long-term memory for Claude Code and other coding agents.
+
+- Claude plugin: MCP + SessionStart / PreCompact / Stop hooks
+- Progressive recall: compact index → full drawer by id
+- Verbatim storage + on-device MiniLM (no cloud LLM compression)
+- Hybrid search (vector + FTS5 + facts), profiles, dream hot/cold
+- One SQLite palace shared across Claude / Codex / Cursor / Grok
+- Continuity bench 6/6; measured ~72% token savings vs pasting docs
+
+Install: `curl -fsSL https://raw.githubusercontent.com/Yupcha/memxt/main/install.sh | bash`
+
+https://github.com/Yupcha/memxt
+```

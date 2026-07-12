@@ -56,9 +56,11 @@ pub const Graph = struct {
             defer db.finalize(lookup);
             db.bindText(lookup, 1, name);
             if (db.step(lookup) == db.c.SQLITE_ROW) {
-                // Update last_seen
                 const id = db.columnInt64(lookup, 0);
-                self.database.exec(std.fmt.allocPrintZ(self.allocator, "UPDATE entities SET last_seen = strftime('%s','now') WHERE id = {d}", .{id}) catch return id);
+                // Touch last_seen (best-effort).
+                const sql = std.fmt.allocPrint(self.allocator, "UPDATE entities SET last_seen = strftime('%s','now') WHERE id = {d}\x00", .{id}) catch return id;
+                defer self.allocator.free(sql);
+                self.database.exec(@ptrCast(sql.ptr));
                 return id;
             }
             return error.NotFound;

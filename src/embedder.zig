@@ -189,9 +189,19 @@ fn quietLog(level: c.ggml_log_level, text: [*c]const u8, user_data: ?*anyopaque)
 // ── Process-global embedder ──
 
 var global_emb: ?Embedder = null;
+/// Path recorded by `setModelPath` so `embed` can lazy-load on first real use.
+/// Points at config/env memory — not freed here.
+var pending_model_path: ?[:0]const u8 = null;
+
+/// Remember where the model lives without loading it. Mine can then skip the
+/// ~0.5s Metal init entirely when every chunk is already stored (incremental).
+pub fn setModelPath(model_path: [:0]const u8) void {
+    pending_model_path = model_path;
+}
 
 pub fn initGlobal(model_path: [:0]const u8) !void {
     if (global_emb != null) return;
+    pending_model_path = model_path;
     global_emb = try Embedder.init(model_path);
 }
 
@@ -200,6 +210,7 @@ pub fn deinitGlobal() void {
         global_emb.?.deinit();
         global_emb = null;
     }
+    pending_model_path = null;
 }
 
 /// True once a model is loaded. Lets callers degrade gracefully (e.g. keyword
@@ -208,7 +219,14 @@ pub fn isReady() bool {
     return global_emb != null;
 }
 
+fn ensureReady() !void {
+    if (global_emb != null) return;
+    const path = pending_model_path orelse return error.EmbedderNotInitialized;
+    global_emb = try Embedder.init(path);
+}
+
 pub fn embed(text: []const u8, allocator: Allocator) ![]f32 {
+    try ensureReady();
     if (global_emb) |*e| {
         return e.embed(text, allocator);
     }

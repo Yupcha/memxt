@@ -1,11 +1,17 @@
-# Using memxt with other harnesses
+# Using memxt with coding agents (beyond Claude Code)
 
-memxt speaks plain MCP over stdio, so it works with any MCP client. Claude Code gets
-the polished experience via the [`claude-plugin`](../claude-plugin) — MCP tools, a
-SessionStart hook that auto-injects the wake-up brief, a PreCompact hook, a skill, and
-slash commands, all wired up by `/plugin install memxt`.
+**Claude Code is the primary product surface** — plugin, SessionStart/PreCompact hooks,
+skill, and slash commands via [`claude-plugin`](../claude-plugin):
 
-**Other harnesses don't have hooks**, so nothing auto-injects memory at session start.
+```text
+/plugin marketplace add Yupcha/memxt
+/plugin install memxt
+```
+
+Everyone else (Codex, Cursor, Grok CLI, Zed, OpenCode, …) uses the same **local MCP**
+server. Point them at one shared `MEMXT_DB` so every agent remembers the same decisions.
+
+**Harnesses without Claude-style hooks** don't auto-inject memory at session start.
 Two things stand in for that:
 
 1. An **MCP server entry** so the harness can spawn `memxt mcp` and see the tools
@@ -102,6 +108,30 @@ survives across sessions and never leaves this machine.
 ```
 
 Reload the MCP servers list in Cursor's settings after adding the file.
+
+## Grok CLI (Grok Build)
+
+**1. MCP server** — add to `~/.grok/config.toml`:
+
+```toml
+[mcp_servers.memory]
+command = "/ABSOLUTE/HOME/.memxt/bin/memxt"
+args = ["mcp"]
+env = { MEMXT_DB = "/ABSOLUTE/HOME/.memxt/palace.db", MEMXT_MODEL = "/ABSOLUTE/HOME/.memxt/lib/minilm.gguf" }
+enabled = true
+startup_timeout_sec = 60
+```
+
+Or: `grok mcp add memory -- /ABSOLUTE/HOME/.memxt/bin/memxt mcp` and set `env` for
+`MEMXT_DB` / `MEMXT_MODEL` in config.
+
+**2. Standing instructions** — project rules or a standing AGENTS-style block (same
+wording as Codex): call `memory_wake_up` at session start; `memory_search` before past
+work; `memory_store` after decisions.
+
+Use the **same** `MEMXT_DB` as Claude Code / Codex so every coding agent shares one
+local palace. Grok’s built-in experimental memory is separate — prefer memxt as the
+system of record if you want cross-agent continuity.
 
 ## Zed
 

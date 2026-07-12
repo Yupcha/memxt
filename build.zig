@@ -64,7 +64,9 @@ fn configureModule(b: *std.Build, mod: *std.Build.Module, is_macos: bool) void {
     // dep) and cross-compiles cleanly (no system-library lookup for the target).
     mod.addCSourceFile(.{
         .file = b.path("lib/sqlite3.c"),
-        .flags = &[_][]const u8{ "-O2", "-DSQLITE_THREADSAFE=1", "-DSQLITE_DQS=0", "-DSQLITE_DEFAULT_MEMSTATUS=0", "-DSQLITE_OMIT_DEPRECATED" },
+        // FTS5 powers hybrid keyword search (identifiers, error codes). Must be
+        // enabled at amalgamation compile time — it's not on by default.
+        .flags = &[_][]const u8{ "-O2", "-DSQLITE_THREADSAFE=1", "-DSQLITE_DQS=0", "-DSQLITE_DEFAULT_MEMSTATUS=0", "-DSQLITE_OMIT_DEPRECATED", "-DSQLITE_ENABLE_FTS5" },
     });
     mod.addCSourceFile(.{
         .file = b.path("lib/sqlite-vec.c"),

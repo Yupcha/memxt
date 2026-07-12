@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>memxt — local memory monitor</title>
+<style>
+  :root {
+    --bg: #0f1419;
+    --panel: #1a2332;
+    --border: #2d3a4d;
+    --text: #e7ecf3;
+    --muted: #8b9bb4;
+    --accent: #5b9fd4;
+    --ok: #3dd68c;
+    --warn: #f0b429;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.45;
+  }
+  header {
+    padding: 1rem 1.5rem; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+  }
+  header h1 { margin: 0; font-size: 1.15rem; font-weight: 600; }
+  header .badge {
+    font-size: 0.75rem; color: var(--ok); border: 1px solid var(--ok);
+    padding: 0.15rem 0.5rem; border-radius: 999px;
+  }
+  main { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; padding: 1rem; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 1rem; min-height: 200px;
+  }
+  .card h2 { margin: 0 0 0.75rem; font-size: 0.95rem; color: var(--accent); }
+  pre, .mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.78rem; white-space: pre-wrap; word-break: break-word;
+    color: var(--muted); margin: 0;
+  }
+  .row { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
+  input, select, button {
+    background: var(--bg); border: 1px solid var(--border); color: var(--text);
+    border-radius: 6px; padding: 0.45rem 0.65rem; font-size: 0.9rem;
+  }
+  input { flex: 1; min-width: 140px; }
+  button {
+    background: var(--accent); color: #0a0e14; border: none; font-weight: 600;
+    cursor: pointer;
+  }
+  button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+  button:hover { filter: brightness(1.08); }
+  .hit {
+    border-top: 1px solid var(--border); padding: 0.6rem 0;
+  }
+  .hit .meta { color: var(--accent); font-size: 0.8rem; margin-bottom: 0.25rem; }
+  .full { grid-column: 1 / -1; }
+  footer { padding: 0.75rem 1.5rem; color: var(--muted); font-size: 0.8rem; border-top: 1px solid var(--border); }
+</style>
+</head>
+<body>
+<header>
+  <h1>🏛️ memxt</h1>
+  <span class="badge">localhost · private</span>
+  <span class="mono" id="status">loading…</span>
+  <div class="row" style="margin:0; margin-left:auto">
+    <button class="secondary" onclick="loadInspect()">Refresh</button>
+    <button class="secondary" onclick="runDream()">Dream</button>
+  </div>
+</header>
+<main>
+  <section class="card">
+    <h2>Palace health</h2>
+    <pre id="inspect">…</pre>
+  </section>
+  <section class="card">
+    <h2>Wake-up brief</h2>
+    <div class="row">
+      <input id="wing" placeholder="wing (optional)" />
+      <button class="secondary" onclick="loadWake()">Load</button>
+    </div>
+    <pre id="wake">…</pre>
+  </section>
+  <section class="card full">
+    <h2>Search</h2>
+    <div class="row">
+      <input id="q" placeholder="query — e.g. why SQLite" />
+      <select id="mode">
+        <option value="hybrid">hybrid</option>
+        <option value="memories">memories</option>
+        <option value="documents">documents</option>
+        <option value="facts">facts</option>
+        <option value="episodes">episodes</option>
+      </select>
+      <button onclick="runSearch()">Search</button>
+    </div>
+    <div id="hits"></div>
+  </section>
+  <section class="card">
+    <h2>Project profile</h2>
+    <pre id="profile">…</pre>
+  </section>
+  <section class="card">
+    <h2>Active facts</h2>
+    <pre id="facts">…</pre>
+  </section>
+</main>
+<footer>
+  Local coding-agent memory · data never leaves this machine ·
+  <span class="mono">memxt serve</span>
+</footer>
+<script>
+async function loadInspect() {
+  const t = await fetch('/api/inspect').then(r => r.text());
+  document.getElementById('inspect').textContent = t;
+  document.getElementById('status').textContent = 'ok · ' + new Date().toLocaleTimeString();
+}
+async function loadWake() {
+  const w = document.getElementById('wing').value.trim();
+  const url = '/api/wake-up' + (w ? '?wing=' + encodeURIComponent(w) : '');
+  document.getElementById('wake').textContent = await fetch(url).then(r => r.text());
+}
+async function loadProfile() {
+  const w = document.getElementById('wing').value.trim();
+  const q = w ? '?wing=' + encodeURIComponent(w) : '';
+  document.getElementById('profile').textContent = await fetch('/api/profile' + q).then(r => r.text());
+  const facts = await fetch('/api/facts' + q).then(r => r.json()).catch(() => []);
+  document.getElementById('facts').textContent = facts.length
+    ? facts.map(f => `#${f.id}  ${f.s} —[${f.p}]→ ${f.o}  (${f.conf})`).join('\n')
+    : '(no facts)';
+}
+async function runSearch() {
+  const q = document.getElementById('q').value.trim();
+  if (!q) return;
+  const mode = document.getElementById('mode').value;
+  const w = document.getElementById('wing').value.trim();
+  let url = '/api/search?q=' + encodeURIComponent(q) + '&mode=' + mode;
+  if (w) url += '&wing=' + encodeURIComponent(w);
+  const hits = await fetch(url).then(r => r.json()).catch(() => []);
+  const el = document.getElementById('hits');
+  if (!hits.length) { el.innerHTML = '<p class="mono">No results</p>'; return; }
+  el.innerHTML = hits.map(h =>
+    `<div class="hit"><div class="meta">#${h.id} · ${h.wing}/${h.room} · score ${h.score}</div><div class="mono">${escapeHtml(h.content)}</div></div>`
+  ).join('');
+}
+async function runDream() {
+  document.getElementById('status').textContent = 'dreaming…';
+  const t = await fetch('/api/dream').then(r => r.text());
+  document.getElementById('inspect').textContent = t + '\n\n' + await fetch('/api/inspect').then(r => r.text());
+  document.getElementById('status').textContent = 'dream done · ' + new Date().toLocaleTimeString();
+}
+function escapeHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+document.getElementById('q').addEventListener('keydown', e => { if (e.key === 'Enter') runSearch(); });
+loadInspect(); loadWake(); loadProfile();
+</script>
+</body>
+</html>

@@ -6,6 +6,16 @@ Legend: `[x]` done · `[~]` partial · `[ ]` planned
 
 ---
 
+## Phase 0.3 — Launch (v0.3.0)
+
+- [x] Facts + profiles + supersession + multi-mode search
+- [x] Progressive disclosure: `memory_search` (index) → `memory_get`
+- [x] Claude hooks: SessionStart + PreCompact + **Stop** (verbatim autosave, no cloud LLM)
+- [x] Dream hot budget + 4-bit cold vectors; `inspect` + `serve` UI
+- [x] Continuity bench 6/6 + token savings measurement
+- [x] Multi-harness: Claude plugin + Codex/Cursor/Grok adopt/instructions
+- [x] Viral README + vs claude-mem / Mem0 / Zep matrix
+
 ## Phase 0 — Shipped (v0.2)
 
 Real, working local memory engine + Claude Code integration. Verified end-to-end
@@ -36,17 +46,40 @@ Close every remaining gap with the upstream `pip install mempalace` surface. Eac
 
 - [x] **Directory walker bug** — fixed in v0.2. Root cause was `cmdMine` using `openFile` to discriminate (it succeeds on directories in Zig 0.16's IO), mis-routing dirs to the conversation path; now discriminates with `openDir`.
 - [ ] **`mine` flag parity** — `--wing`, `--room`, `--recursive`, `--ignore`, `--dry-run`
-- [ ] **`search` flag parity** — `--limit`, `--wing`, `--format=json|md|plain`, similarity threshold
+- [x] **`search` flag parity** — `--limit`, `--wing`, `--format=json|md|plain` (threshold still open)
 - [ ] **`init` vs `stats`** — upstream uses `init`; alias our `stats` where appropriate
-- [ ] **Incremental re-mining** — content-hash skip for unchanged files (currently re-embeds all)
-- [ ] **`forget <id|wing>`** — evict drawers
-- [ ] **Export / import** — `memxt export <path>` JSONL dump + re-ingest round-trip
+- [x] **Incremental re-mining** — content-hash skip before embed; pure re-mine skips model load
+- [x] **`forget <id|--wing>`** — evict a drawer or whole wing (CLI + MCP)
+- [x] **Export / import** — `memxt export` JSONL + `memxt import` with dupe skip
 - [ ] **Ignore-pattern parity** — `.gitignore`-style globs matching upstream semantics
 - [ ] **Config schema audit** — every upstream yaml key respected or rejected with a diagnostic
 - [ ] **Python-parity output strings** — exit codes, stderr format, progress-bar layout for script consumers
 - [ ] **Embedding model swap** — allow upstream's default model name via `model: <name>` resolving to HF URL
 
 **Definition of done:** a user can `pip uninstall mempalace && curl ... | bash && ln -s .../memxt .../mempalace` and every script in their pipeline keeps working unchanged.
+
+### Shipped vs Supermemory wedge (local coding agents)
+
+- [x] **Hybrid FTS5 + vector search** — RRF fusion; exact identifiers / error codes recall
+- [x] **Wake-up v2** — L0 identity + L1 project profile (decisions) + L2 recent work, wing-scoped
+- [x] **Project-default wing** — git-root basename; hooks/MCP/wake-up honor it
+- [x] **Schema v3 semantic core** — `facts` + `profile_entries` + drawer kind/tier
+- [x] **Heuristic fact extract + supersession** on `memory_store` (room=decisions)
+- [x] **`memory_profile` MCP** — profile without embedding model
+- [x] **`memxt inspect`** — palace health (kinds, facts, profile, vectors)
+- [x] **`memxt adopt`** — mine + wire Claude/Codex/Cursor/Grok/Zed
+- [x] **`instructions --harness grok`** — Grok CLI local MCP setup
+- [x] **Search modes** — hybrid | memories | documents | facts | episodes (+ `--as-of`)
+- [x] **Hot/cold tiers** — demote drops vec row; FTS keeps cold; decisions pinned
+- [x] **`memxt dream`** — expire facts, demote, hot budget, episode clusters
+- [x] **Schema v4 clusters** — hierarchical summary drawers
+- [x] **PreCompact** — episode store + decision-snippet extract
+- [x] **TurboQuant-style online VQ** — 4-bit rotate+scalar+residual; `vec_quant` on demote
+- [x] **`adopt --write`** — write Cursor mcp.json + Codex/Grok snippets
+- [x] **`memxt serve` + UI** — localhost monitor (inspect/search/wake/dream/profile)
+- [x] **Coding Continuity Bench** — `scripts/bench-continuity.sh` (6/6)
+- [x] **Scale bench** — `scripts/bench-scale.sh` (seed/search/dream/quant)
+- [x] **Launch pack** — show-hn, awesome entries, docs/launch
 
 ---
 
@@ -66,7 +99,7 @@ Ship features upstream Python cannot match without rewriting. Each lands a capab
 - [ ] **Watch mode** — `memxt watch <path>` file-system events → auto re-mine (upstream Python blocks on ChromaDB lock; we don't)
 - [ ] **Embedded HTTP API** — `memxt serve --port 8080` pure Zig handler, <5 MB RAM overhead
 - [ ] **Web UI** — single-file static dashboard shipped inside binary (SQLite browser + search box)
-- [ ] **Hybrid search** — BM25 + vector fusion (upstream is vector-only)
+- [x] **Hybrid search** — FTS5 BM25 + vector RRF fusion (shipped with schema v2)
 - [ ] **Time-scoped queries** — `--since 2026-01-01`, `--until`, decay-weighted ranking
 
 ### v0.5 — Ecosystem & Distribution
@@ -75,6 +108,7 @@ Ship features upstream Python cannot match without rewriting. Each lands a capab
 - [ ] **Docker image** — ~15 MB distroless image (vs upstream ~1.2 GB Python+ML)
 - [ ] **Shell completions** — zsh / bash / fish
 - [x] **Claude Code plugin** — `claude-plugin/` wires MCP + hooks + skill + slash commands (v0.2)
+- [x] **Steal claude-mem users** — progressive disclosure (`memory_search` index → `memory_get`), Stop autosave (verbatim, no cloud LLM), README head-to-head vs claude-mem
 - [ ] **Plugin SDK** — stable `lib/memxt.h` C ABI for 3rd-party languages
 
 ### v0.6+ — Intelligence Layer
