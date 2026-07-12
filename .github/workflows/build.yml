@@ -64,7 +64,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: lib/llama.cpp/build
-          key: llama-cpp-${{ runner.os }}-${{ runner.arch }}-${{ steps.llama_sha.outputs.sha }}-libcxx-v2
+          # -nonative-v3: the previous caches were built with GGML_NATIVE=ON
+          # (-march=native), so they carry the CPU features of whichever runner
+          # happened to build them. Restoring one onto a runner with a narrower
+          # feature set made the first ggml kernel — i.e. the first embed, during
+          # `mine` — die with SIGILL (exit 132). The key MUST change, or the
+          # poisoned archives are simply restored again and the flag below is moot.
+          key: llama-cpp-${{ runner.os }}-${{ runner.arch }}-${{ steps.llama_sha.outputs.sha }}-libcxx-nonative-v3
 
       - name: Download Neural Matrix (GGUF)
         run: |
@@ -75,10 +81,18 @@ jobs:
       - name: Build llama.cpp Static Libraries
         if: steps.cache_llama.outputs.cache-hit != 'true'
         run: |
+          # GGML_NATIVE=OFF on BOTH arms. ggml defaults it ON, which compiles with
+          # the *build* runner's CPU features (-march=native). These archives are
+          # then cached and restored onto a DIFFERENT runner — GitHub's pool is
+          # heterogeneous — and the first ggml kernel executed hits an instruction
+          # the host doesn't have: SIGILL, exit 132. It surfaces in `memxt mine`
+          # (the first real embed); `init`/`stats` pass because they never touch
+          # the model. Build a portable baseline instead; CI perf is irrelevant.
           if [ "${{ runner.os }}" = "macOS" ]; then
             cmake -S lib/llama.cpp -B lib/llama.cpp/build \
               -DCMAKE_BUILD_TYPE=Release \
               -DBUILD_SHARED_LIBS=OFF \
+              -DGGML_NATIVE=OFF \
               -DGGML_METAL=ON \
               -DGGML_BLAS=ON \
               -DLLAMA_BUILD_TESTS=OFF \
@@ -93,6 +107,7 @@ jobs:
               -DBUILD_SHARED_LIBS=OFF \
               -DCMAKE_CXX_FLAGS="-stdlib=libc++" \
               -DCMAKE_EXE_LINKER_FLAGS="-stdlib=libc++" \
+              -DGGML_NATIVE=OFF \
               -DGGML_METAL=OFF \
               -DGGML_BLAS=OFF \
               -DLLAMA_BUILD_TESTS=OFF \
