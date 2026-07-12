@@ -5,27 +5,27 @@
 class Memxt < Formula
   desc "Local-first long-term memory for AI coding agents"
   homepage "https://github.com/Yupcha/memxt"
-  version "0.2.0"
+  version "0.3.3"
   license "MIT"
 
   on_macos do
     on_arm do
-      url "https://github.com/Yupcha/memxt/releases/download/v0.2.0/memxt-darwin-aarch64.tar.gz"
+      url "https://github.com/Yupcha/memxt/releases/download/v#{version}/memxt-darwin-aarch64.tar.gz"
       sha256 "REPLACE_DARWIN_AARCH64"
     end
     on_intel do
-      url "https://github.com/Yupcha/memxt/releases/download/v0.2.0/memxt-darwin-x86_64.tar.gz"
+      url "https://github.com/Yupcha/memxt/releases/download/v#{version}/memxt-darwin-x86_64.tar.gz"
       sha256 "REPLACE_DARWIN_X86_64"
     end
   end
 
   on_linux do
     on_arm do
-      url "https://github.com/Yupcha/memxt/releases/download/v0.2.0/memxt-linux-aarch64.tar.gz"
+      url "https://github.com/Yupcha/memxt/releases/download/v#{version}/memxt-linux-aarch64.tar.gz"
       sha256 "REPLACE_LINUX_AARCH64"
     end
     on_intel do
-      url "https://github.com/Yupcha/memxt/releases/download/v0.2.0/memxt-linux-x86_64.tar.gz"
+      url "https://github.com/Yupcha/memxt/releases/download/v#{version}/memxt-linux-x86_64.tar.gz"
       sha256 "REPLACE_LINUX_X86_64"
     end
   end

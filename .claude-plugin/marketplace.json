@@ -3,14 +3,14 @@
   "owner": { "name": "Yupcha", "url": "https://github.com/Yupcha" },
   "metadata": {
     "description": "Local-first memory for AI coding agents.",
-    "version": "0.2.0"
+    "version": "0.3.3"
   },
   "plugins": [
     {
       "name": "memxt",
       "source": "./claude-plugin",
       "description": "Persistent, private, local memory for Claude Code — your agent remembers your code and decisions across sessions. One static binary, no cloud. Requires the memxt binary (curl install).",
-      "version": "0.2.0",
+      "version": "0.3.3",
       "license": "MIT",
       "keywords": ["memory", "local-first", "mcp", "privacy"]
     }

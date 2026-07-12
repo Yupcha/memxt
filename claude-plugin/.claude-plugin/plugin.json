@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "memxt",
   "displayName": "memxt — Local Memory",
-  "version": "0.2.0",
+  "version": "0.3.3",
   "description": "Persistent, private, local-first memory for Claude Code. Your agent remembers your code and decisions across sessions — one static binary, no cloud, nothing leaves your machine.",
   "author": { "name": "Yupcha", "url": "https://github.com/Yupcha" },
   "homepage": "https://github.com/Yupcha/memxt",
