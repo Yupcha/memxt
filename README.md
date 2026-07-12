@@ -1,5 +1,7 @@
 <div align="center">
-  <img src="assets/logo.svg" alt="memXT" width="420"/>
+  <a href="https://yupcha.github.io/memxt/assets/logo-3d.html" title="Open the interactive 3D logo">
+    <img src="assets/logo-3d.gif" alt="memXT" width="460"/>
+  </a>
 
   <p>
     <b>Your coding agent has amnesia. memxt is the cure — and it never leaves your laptop.</b><br/>

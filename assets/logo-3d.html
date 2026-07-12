@@ -47,14 +47,19 @@ const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.enablePan = false;
 
-// ── Lights: warm key + cool rim, so gold reads metallic and cyan pops
-scene.add(new THREE.AmbientLight('#ffffff', 0.55));
-const key = new THREE.DirectionalLight('#FFF3D0', 2.6);
+// ── Lights.
+// Keep every light warm/neutral. A metal's reflection is albedo x light colour,
+// so a cyan light on gold (yellow) multiplies out to GREEN and the bolt turns
+// olive. The cyan must come from the XT's own albedo, never from a lamp.
+scene.add(new THREE.AmbientLight('#FFFFFF', 0.62));
+const key = new THREE.DirectionalLight('#FFF6E5', 2.9);
 key.position.set(-180, 260, 420); scene.add(key);
-const rim = new THREE.DirectionalLight('#22D3EE', 1.5);
-rim.position.set(320, -140, -260); scene.add(rim);
-const warm = new THREE.PointLight('#FBBF24', 1.9, 1600);
-warm.position.set(120, 60, 260); scene.add(warm);
+const fill = new THREE.DirectionalLight('#FFFFFF', 0.9);
+fill.position.set(300, 40, 320); scene.add(fill);
+const rim = new THREE.DirectionalLight('#FFD9A0', 1.6);
+rim.position.set(260, -160, -280); scene.add(rim);
+const warm = new THREE.PointLight('#FFDFA0', 1.4, 1800);
+warm.position.set(120, 80, 280); scene.add(warm);
 
 // ── Extrude the logo's own outlines (same paths, same font, same colours)
 const group = new THREE.Group();
@@ -64,8 +69,8 @@ for (const p of new SVGLoader().parse(SVG).paths) {
   const gold = key !== '#f8fafc' && key !== '#22d3ee';
   const mat = new THREE.MeshStandardMaterial({
     color: new THREE.Color(col),
-    metalness: gold ? 0.85 : 0.35,
-    roughness: gold ? 0.25 : 0.45,
+    metalness: gold ? 0.70 : 0.25,
+    roughness: gold ? 0.32 : 0.50,
     side: THREE.DoubleSide,
   });
   for (const shape of SVGLoader.createShapes(p)) {
@@ -91,14 +96,31 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 
-const t0 = performance.now();
-(function loop(){
-  requestAnimationFrame(loop);
-  const t = (performance.now() - t0) / 1000;
-  pivot.rotation.y = Math.sin(t * 0.45) * 0.42;   // gentle sway, not a spin
-  pivot.rotation.x = Math.sin(t * 0.32) * 0.10;
-  pivot.position.y = Math.sin(t * 0.7) * 6;        // slow float
-  controls.update();
-  renderer.render(scene, camera);
-})();
+// Pose as a function of a normalised phase p in [0,1) — every term is a whole
+// number of cycles over p, so the motion loops seamlessly. Frame capture drives
+// p directly (?p=0.25); interactive mode just sweeps it with the clock.
+function pose(p) {
+  const a = 2 * Math.PI * p;
+  pivot.rotation.y = Math.sin(a) * 0.50;      // sway, never edge-on
+  pivot.rotation.x = Math.sin(2 * a) * 0.10;
+  pivot.position.y = Math.sin(a) * 7;         // slow float
+}
+
+const frame = new URLSearchParams(location.search).get('p');
+if (frame !== null) {
+  // Deterministic pose, for GIF capture. Must keep re-rendering: the WebGL
+  // drawing buffer isn't preserved, so a single render() composites as blank.
+  document.querySelector('.hint')?.remove();
+  const p = parseFloat(frame);
+  (function hold(){ requestAnimationFrame(hold); pose(p); renderer.render(scene, camera); })();
+} else {
+  const PERIOD = 14;                          // seconds per full loop
+  const t0 = performance.now();
+  (function loop(){
+    requestAnimationFrame(loop);
+    pose((((performance.now() - t0) / 1000) % PERIOD) / PERIOD);
+    controls.update();
+    renderer.render(scene, camera);
+  })();
+}
 </script>
