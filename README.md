@@ -1,7 +1,5 @@
 <div align="center">
-  <a href="https://yupcha.github.io/memxt/assets/logo-3d.html" title="Open the interactive 3D logo">
-    <img src="assets/logo-3d.gif" alt="memXT" width="460"/>
-  </a>
+  <img src="assets/logo.svg" alt="memXT" width="420"/>
 
   <p>
     <b>Your coding agent has amnesia. memxt is the cure — and it never leaves your laptop.</b><br/>
@@ -240,8 +238,14 @@ Details live in [`install.sh`](./install.sh) and the comments in [`build.zig`](.
 
 <div align="center">
 
+<a href="https://yupcha.github.io/memxt/assets/logo-3d.html" title="Open the interactive 3D logo — drag to orbit">
+  <img src="assets/logo-3d.gif" alt="memXT in 3D" width="440"/>
+</a>
+
+<sub><a href="https://yupcha.github.io/memxt/assets/logo-3d.html"><b>↑ drag it in 3D</b></a></sub>
+
 **If memxt saves you one re-explain session, [star it](https://github.com/Yupcha/memxt) and tell another Claude Code user.**
 
-That's how local tools win. 🏛
+That's how local tools win. ⚡
 
 </div>
