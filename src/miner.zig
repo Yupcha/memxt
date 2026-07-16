@@ -9,6 +9,7 @@ const std = @import("std");
 const db = @import("db.zig");
 const palace_mod = @import("palace.zig");
 const embed = @import("embedder.zig");
+const anchors_mod = @import("anchors.zig");
 
 const Allocator = std.mem.Allocator;
 const Palace = palace_mod.Palace;
@@ -51,6 +52,7 @@ pub fn mineDirectory(
     // though a real miner might create a room per sub-folder.
     const room_name = std.fs.path.basename(dir_path);
     const room_id = try palace.createRoom(wing_id, room_name, "auto-mined");
+    anchors_mod.ensureTables(palace.database);
 
     // Open and walk the directory
     var dir = std.Io.Dir.cwd().openDir(io, dir_path, .{ .iterate = true }) catch |err| {
@@ -123,6 +125,11 @@ fn processFileConcurrently(
         allocator.free(chunks);
     }
 
+    // Whole-file evidence anchor: every drawer mined from this file is pinned
+    // to the file's current content hash so recall can detect staleness.
+    var file_hash_buf: [64]u8 = undefined;
+    const file_hash: ?[]const u8 = palace_mod.Palace.contentHashHex(content, &file_hash_buf) catch null;
+
     var drawers_added: u32 = 0;
     var chunks_skipped: u32 = 0;
     var errors: u32 = 0;
@@ -131,6 +138,9 @@ fn processFileConcurrently(
         var hash_buf: [64]u8 = undefined;
         if (palace_mod.Palace.contentHashHex(chunk, &hash_buf)) |hex| {
             if (palace.hasContentHash(hex)) {
+                // Chunk unchanged and still present → re-point its anchor at
+                // the file's current hash (fresh again after a re-mine).
+                if (file_hash) |fh| anchors_mod.refreshChunkAnchor(palace.database, hex, full_path, fh);
                 chunks_skipped += 1;
                 continue;
             }
@@ -143,11 +153,12 @@ fn processFileConcurrently(
         };
         defer allocator.free(embedding);
 
-        _ = palace.insertDrawer(room_id, chunk, entry_path, "file", @intCast(i), embedding) catch |err| {
+        const drawer_id = palace.insertDrawer(room_id, chunk, entry_path, "file", @intCast(i), embedding) catch |err| {
             std.debug.print("warn: store failed for {s} chunk {d}: {s}\n", .{ entry_path, i, @errorName(err) });
             errors += 1;
             continue;
         };
+        if (file_hash) |fh| anchors_mod.recordAnchor(palace.database, drawer_id, full_path, fh, null);
 
         drawers_added += 1;
     }
@@ -173,6 +184,7 @@ pub fn mineFile(
     const wing_id = try palace.createWing(wing_name, "", "auto-mined");
     const room_name = std.fs.path.basename(file_path);
     const room_id = try palace.createRoom(wing_id, room_name, "auto-mined");
+    anchors_mod.ensureTables(palace.database);
 
     const dir = std.Io.Dir.cwd();
     const content = readFileContent(dir, io, file_path, allocator) orelse return stats;
@@ -180,6 +192,9 @@ pub fn mineFile(
     if (content.len == 0) return stats;
 
     stats.bytes_processed = content.len;
+
+    var file_hash_buf: [64]u8 = undefined;
+    const file_hash: ?[]const u8 = palace_mod.Palace.contentHashHex(content, &file_hash_buf) catch null;
 
     const chunks = try chunkContent(content, 2048, 256, allocator);
     defer {
@@ -191,6 +206,7 @@ pub fn mineFile(
         var hash_buf: [64]u8 = undefined;
         if (palace_mod.Palace.contentHashHex(chunk, &hash_buf)) |hex| {
             if (palace.hasContentHash(hex)) {
+                if (file_hash) |fh| anchors_mod.refreshChunkAnchor(palace.database, hex, file_path, fh);
                 stats.chunks_skipped += 1;
                 continue;
             }
@@ -202,11 +218,12 @@ pub fn mineFile(
             continue;
         };
         defer allocator.free(embedding);
-        _ = palace.insertDrawer(room_id, chunk, file_path, "file", @intCast(i), embedding) catch |err| {
+        const drawer_id = palace.insertDrawer(room_id, chunk, file_path, "file", @intCast(i), embedding) catch |err| {
             std.debug.print("warn: store failed for {s} chunk {d}: {s}\n", .{ file_path, i, @errorName(err) });
             stats.errors += 1;
             continue;
         };
+        if (file_hash) |fh| anchors_mod.recordAnchor(palace.database, drawer_id, file_path, fh, null);
         stats.drawers_created += 1;
     }
     stats.files_processed = 1;
@@ -228,6 +245,7 @@ pub fn storeMemory(
 
     const wing_id = try palace.createWing(wing_name, "", "memory");
     const room_id = try palace.createRoom(wing_id, room_name, "");
+    anchors_mod.ensureTables(palace.database);
     const kind = palace_mod.Palace.deriveKind("memory", room_name);
     const source_type: []const u8 = if (std.mem.eql(u8, kind, "decision")) "decision" else "memory";
     const trust: []const u8 = if (std.mem.eql(u8, kind, "decision")) "decision" else "agent";
@@ -251,6 +269,10 @@ pub fn storeMemory(
         defer facts.freeExtracted(extracted, allocator);
         _ = facts.ingestExtracted(palace.database, wing_id, wing_name, drawer_id, extracted, trust, allocator) catch {};
     } else |_| {}
+
+    // Grounding: anchor any real file paths mentioned in the memory so recall
+    // can flag it stale once those files change (best-effort).
+    _ = anchors_mod.anchorTextPaths(palace.database, drawer_id, content, allocator);
 
     return drawer_id;
 }

@@ -16,6 +16,7 @@ const hooks = @import("hooks.zig");
 const inspect_mod = @import("inspect.zig");
 const dream_mod = @import("dream.zig");
 const serve_mod = @import("serve.zig");
+const anchors_mod = @import("anchors.zig");
 
 const c_env = @cImport({
     @cInclude("stdlib.h");
@@ -59,6 +60,8 @@ pub fn main(init: std.process.Init) !void {
         try cmdSearch(&args_it, &cfg, allocator, init.io);
     } else if (std.mem.eql(u8, command, "stats")) {
         try cmdStats(&cfg, allocator);
+    } else if (std.mem.eql(u8, command, "anchors")) {
+        try cmdAnchors(&args_it, &cfg, allocator);
     } else if (std.mem.eql(u8, command, "inspect")) {
         try cmdInspect(&cfg, allocator);
     } else if (std.mem.eql(u8, command, "adopt")) {
@@ -133,6 +136,7 @@ fn printUsage() void {
         \\    memxt export [path] [--wing NAME]    JSONL dump
         \\    memxt import <path>                  Re-ingest a JSONL export
         \\    memxt stats                          Palace statistics
+        \\    memxt anchors [--verify] [--wing X]  Anchor health (grounded memory)
         \\    memxt kg [subject]                   Query knowledge graph
         \\    memxt hook                           Claude Code hook (JSON stdin/stdout)
         \\    memxt serve [--port N]               Localhost monitor UI (127.0.0.1)
@@ -374,6 +378,36 @@ fn cmdStats(cfg: *const config.Config, allocator: std.mem.Allocator) !void {
     defer allocator.free(stat_str);
 
     std.debug.print("{s}\n", .{stat_str});
+}
+
+/// Anchor health: how many drawers are grounded to files on disk, and — with
+/// --verify — how many of those anchors still match the current file content.
+fn cmdAnchors(args_it: *std.process.Args.Iterator, cfg: *const config.Config, allocator: std.mem.Allocator) !void {
+    var wing: ?[]const u8 = null;
+    var do_verify = false;
+
+    while (args_it.next()) |arg| {
+        if (std.mem.eql(u8, arg, "--wing")) {
+            wing = args_it.next() orelse {
+                std.debug.print("--wing requires a name\n", .{});
+                return;
+            };
+        } else if (std.mem.eql(u8, arg, "--verify")) {
+            do_verify = true;
+        } else {
+            std.debug.print("Usage: memxt anchors [--verify] [--wing NAME]\n", .{});
+            return;
+        }
+    }
+
+    var database = try openDb(cfg);
+    defer database.close();
+    database.createPalaceSchema();
+    anchors_mod.ensureTables(&database);
+
+    const report = try anchors_mod.renderReport(&database, wing, do_verify, allocator);
+    defer allocator.free(report);
+    std.debug.print("{s}", .{report});
 }
 
 fn cmdInspect(cfg: *const config.Config, allocator: std.mem.Allocator) !void {
@@ -1308,5 +1342,6 @@ fn jsonObjStr(obj: std.json.ObjectMap, key: []const u8) ?[]const u8 {
 test "memxt unified testing suite" {
     _ = @import("db.zig");
     _ = @import("quant.zig");
+    _ = @import("anchors.zig");
 }
 
