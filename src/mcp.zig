@@ -30,6 +30,7 @@ const wakeup = @import("wakeup.zig");
 const profile_mod = @import("profile.zig");
 const facts_mod = @import("facts.zig");
 const dream_mod = @import("dream.zig");
+const packer = @import("packer.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -54,7 +55,8 @@ const TOOLS_LIST =
     \\          "wing": { "type": "string", "description": "Limit search to one project/domain wing (optional)." },
     \\          "mode": { "type": "string", "description": "hybrid|memories|documents|facts|episodes (default hybrid)." },
     \\          "detail": { "type": "string", "description": "index (default, compact) | full (entire body in results)." },
-    \\          "as_of": { "type": "integer", "description": "Unix timestamp for temporal fact queries (optional)." }
+    \\          "as_of": { "type": "integer", "description": "Unix timestamp for temporal fact queries (optional)." },
+    \\          "budget_tokens": { "type": "integer", "description": "Budget mode: instead of the index list, return ONE packed markdown brief that fits this many tokens — dense facts first, then top bodies, trimmed at line boundaries. Drawer ids are kept so you can memory_get for more." }
     \\        },
     \\        "required": ["query"]
     \\      }
@@ -89,7 +91,8 @@ const TOOLS_LIST =
     \\      "inputSchema": {
     \\        "type": "object",
     \\        "properties": {
-    \\          "wing": { "type": "string", "description": "Limit to one project/domain (defaults to current project wing)." }
+    \\          "wing": { "type": "string", "description": "Limit to one project/domain (defaults to current project wing)." },
+    \\          "budget_tokens": { "type": "integer", "description": "Fit the brief to this token budget. Layers keep priority L0 identity > L1 profile > L2 recent work; the cut lands on a line boundary." }
     \\        }
     \\      }
     \\    },
@@ -324,7 +327,7 @@ fn dispatchTool(
         const as_of = getInt(args, "as_of");
         const detail_s = getStr(args, "detail") orelse "index";
         const full = std.ascii.eqlIgnoreCase(detail_s, "full");
-        return toolSearch(allocator, pal, io, query, limit, wing, mode, as_of, full);
+        return toolSearch(allocator, pal, io, query, limit, wing, mode, as_of, full, getBudget(args));
     } else if (std.mem.eql(u8, name, "memory_get")) {
         return toolGet(allocator, pal, args);
     } else if (std.mem.eql(u8, name, "memory_store")) {
@@ -348,7 +351,7 @@ fn dispatchTool(
             if (!std.mem.eql(u8, cfg.default_wing, "default")) break :blk cfg.default_wing;
             break :blk null;
         };
-        return .{ .text = try wakeup.generate(database, wing, allocator) };
+        return .{ .text = try wakeup.generateBudgeted(database, wing, getBudget(args), allocator) };
     } else if (std.mem.eql(u8, name, "memory_profile")) {
         const wing_name = getStr(args, "wing") orelse cfg.default_wing;
         const wing_id = pal.getWingId(wing_name) orelse {
@@ -397,6 +400,12 @@ fn dispatchTool(
 
 const INDEX_SNIPPET_CHARS: usize = 120;
 
+// Budget mode: fetch deeper than the plain index so the packer has real
+// choice, feed full bodies for the top few and snippets for the rest.
+const PACK_FETCH_K: i32 = 20;
+const PACK_FULL_BODY_TOP: usize = 5;
+const PACK_SNIPPET_CHARS: usize = 240;
+
 fn toolSearch(
     allocator: Allocator,
     pal: *palace.Palace,
@@ -407,6 +416,7 @@ fn toolSearch(
     mode: searcher.SearchMode,
     as_of: ?i64,
     full: bool,
+    budget_tokens: ?usize,
 ) !ToolResult {
     var q_vec: []const f32 = &[_]f32{};
     var q_owned = false;
@@ -417,8 +427,9 @@ fn toolSearch(
     }
     defer if (q_owned) allocator.free(q_vec);
 
+    const fetch_limit: i32 = if (budget_tokens != null) @max(limit, PACK_FETCH_K) else limit;
     const results = try searcher.search(pal, query, q_vec, .{
-        .limit = limit,
+        .limit = fetch_limit,
         .wing = wing,
         .mode = mode,
         .as_of = as_of,
@@ -434,6 +445,8 @@ fn toolSearch(
     }
 
     if (results.len == 0) return .{ .text = try allocator.dupe(u8, "No relevant memories found.") };
+
+    if (budget_tokens) |bt| return toolSearchPacked(allocator, results, bt);
 
     var out: std.ArrayListUnmanaged(u8) = .empty;
     errdefer out.deinit(allocator);
@@ -507,6 +520,65 @@ fn toolSearch(
     errdefer allocator.free(structured);
 
     return .{ .text = try out.toOwnedSlice(allocator), .structured = structured };
+}
+
+/// Budget mode: compile the ranked hits into ONE packed markdown brief that
+/// fits `budget` tokens (facts first, then bodies, trimmed at line
+/// boundaries), instead of the plain index list.
+fn toolSearchPacked(allocator: Allocator, results: []const palace.SearchResult, budget: usize) !ToolResult {
+    var labels: std.ArrayListUnmanaged([]u8) = .empty;
+    defer {
+        for (labels.items) |l| allocator.free(l);
+        labels.deinit(allocator);
+    }
+    var items: std.ArrayListUnmanaged(packer.Item) = .empty;
+    defer items.deinit(allocator);
+
+    var body_rank: usize = 0;
+    for (results) |r| {
+        // Facts surface with source_path "fact" (see searcher.zig) — dense tier.
+        if (std.mem.eql(u8, r.source_path, "fact")) {
+            try items.append(allocator, .{
+                .kind = .fact,
+                .text = r.content,
+                .drawer_id = if (r.drawer_id > 0) r.drawer_id else null,
+            });
+            continue;
+        }
+        const label = try std.fmt.allocPrint(allocator, "[{s}/{s}] {s}", .{ r.wing_name, r.room_name, r.source_path });
+        try labels.append(allocator, label);
+        const kind: packer.ItemKind = if (body_rank < PACK_FULL_BODY_TOP) .body else .snippet;
+        try items.append(allocator, .{
+            .kind = kind,
+            .text = if (kind == .body) r.content else snippetOf(r.content, PACK_SNIPPET_CHARS),
+            .drawer_id = r.drawer_id,
+            .label = label,
+        });
+        body_rank += 1;
+    }
+
+    // Reserve a little headroom so header line + brief stay within budget.
+    const reserve = @min(budget / 5, 16);
+    var pk = try packer.pack(items.items, budget - reserve, allocator);
+    defer pk.deinit(allocator);
+
+    const text = try std.fmt.allocPrint(allocator,
+        \\Packed brief — budget {d} tokens, ~{d} estimated used, {d}/{d} hits packed. memory_get an id for full text.
+        \\
+        \\{s}
+    , .{ budget, pk.used_tokens, pk.included, pk.total, pk.text });
+    errdefer allocator.free(text);
+
+    const structured = try std.json.Stringify.valueAlloc(allocator, .{
+        .budget_tokens = budget,
+        .estimated_tokens = pk.used_tokens,
+        .packed_hits = pk.included,
+        .total_hits = pk.total,
+        .brief = pk.text,
+    }, .{});
+    errdefer allocator.free(structured);
+
+    return .{ .text = text, .structured = structured };
 }
 
 fn snippetOf(content: []const u8, max_chars: usize) []const u8 {
@@ -818,6 +890,14 @@ fn getStr(args: ?std.json.Value, key: []const u8) ?[]const u8 {
         .string => |s| if (s.len > 0) s else null,
         else => null,
     };
+}
+
+/// Optional `budget_tokens` argument, clamped to a sane positive range.
+/// Zero/negative/absurd values fall back to null (no budget mode).
+fn getBudget(args: ?std.json.Value) ?usize {
+    const bt = getInt(args, "budget_tokens") orelse return null;
+    if (bt <= 0) return null;
+    return @intCast(@min(bt, 1_000_000));
 }
 
 fn getInt(args: ?std.json.Value, key: []const u8) ?i64 {

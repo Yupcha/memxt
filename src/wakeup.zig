@@ -16,6 +16,7 @@ const std = @import("std");
 const db = @import("db.zig");
 const profile_mod = @import("profile.zig");
 const facts_mod = @import("facts.zig");
+const packer = @import("packer.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -107,6 +108,23 @@ pub fn generate(database: *db.Database, wing_filter: ?[]const u8, allocator: All
     try out.appendSlice(allocator, wing_note);
 
     return out.toOwnedSlice(allocator);
+}
+
+/// Budget-aware variant: assemble the normal L0/L1/L2 brief, then fit it to
+/// `budget_tokens` through the packer. The packer trims from the end at
+/// line/sentence boundaries, so layers keep priority order L0 > L1 > L2.
+/// A null budget keeps default behavior (identical to `generate`).
+pub fn generateBudgeted(
+    database: *db.Database,
+    wing_filter: ?[]const u8,
+    budget_tokens: ?usize,
+    allocator: Allocator,
+) ![]u8 {
+    const full = try generate(database, wing_filter, allocator);
+    const budget = budget_tokens orelse return full;
+    if (packer.estimateTokens(full) <= budget) return full;
+    defer allocator.free(full);
+    return packer.fitToBudget(full, budget, allocator);
 }
 
 /// Profile-ish rooms and source types: decisions, conventions, profile, notes from agent.
