@@ -303,7 +303,10 @@ pub const Palace = struct {
             _ = db.c.sqlite3_bind_null(stmt, 8);
         }
 
-        if (db.step(stmt) != db.c.SQLITE_DONE) {
+        // Retry once on SQLITE_BUSY: parallel fleet writers to one palace can
+        // still collide at the busy_timeout edge, and dropping the memory is
+        // the worst outcome.
+        if (db.stepRetryBusy(stmt) != db.c.SQLITE_DONE) {
             std.debug.print("drawer insert failed: {s}\n", .{self.database.errmsg()});
             return error.InsertFailed;
         }
@@ -320,7 +323,7 @@ pub const Palace = struct {
             db.bindInt64(vec_stmt, 1, drawer_id);
             db.bindBlob(vec_stmt, 2, std.mem.sliceAsBytes(embedding));
 
-            _ = db.step(vec_stmt);
+            _ = db.stepRetryBusy(vec_stmt);
         }
 
         // Keep FTS5 in sync for hybrid keyword search.
@@ -333,7 +336,7 @@ pub const Palace = struct {
                 db.bindInt64(fts_stmt, 1, drawer_id);
                 db.bindText(fts_stmt, 2, content);
                 db.bindText(fts_stmt, 3, source_path);
-                _ = db.step(fts_stmt);
+                _ = db.stepRetryBusy(fts_stmt);
             }
         }
 
@@ -881,7 +884,7 @@ pub const Palace = struct {
         const stmt = self.database.prepare("DELETE FROM drawers WHERE id = ?") orelse return error.PrepareFailed;
         defer db.finalize(stmt);
         db.bindInt64(stmt, 1, drawer_id);
-        if (db.step(stmt) != db.c.SQLITE_DONE) return error.DeleteFailed;
+        if (db.stepRetryBusy(stmt) != db.c.SQLITE_DONE) return error.DeleteFailed;
 
         return self.database.changes() > 0;
     }

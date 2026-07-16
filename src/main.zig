@@ -1308,5 +1308,6 @@ fn jsonObjStr(obj: std.json.ObjectMap, key: []const u8) ?[]const u8 {
 test "memxt unified testing suite" {
     _ = @import("db.zig");
     _ = @import("quant.zig");
+    _ = @import("fleet.zig");
 }
 

@@ -30,6 +30,7 @@ const wakeup = @import("wakeup.zig");
 const profile_mod = @import("profile.zig");
 const facts_mod = @import("facts.zig");
 const dream_mod = @import("dream.zig");
+const fleet = @import("fleet.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -78,7 +79,9 @@ const TOOLS_LIST =
     \\        "properties": {
     \\          "content": { "type": "string", "description": "The exact text to remember." },
     \\          "wing": { "type": "string", "description": "Project/domain bucket (default: current project)." },
-    \\          "room": { "type": "string", "description": "Topic within the wing (default: notes). Use 'decisions' for durable choices." }
+    \\          "room": { "type": "string", "description": "Topic within the wing (default: notes). Use 'decisions' for durable choices." },
+    \\          "source": { "type": "string", "description": "Who is writing, for fleet attribution: e.g. claude-code, subagent:verify-1, codex. Default: MEMXT_SOURCE env, else 'agent'." },
+    \\          "scratch": { "type": "boolean", "description": "Session-scoped scratch memory: expires (default 24h, MEMXT_SCRATCH_TTL secs) at the next dream cycle unless memory_promote keeps it." }
     \\        },
     \\        "required": ["content"]
     \\      }
@@ -129,6 +132,17 @@ const TOOLS_LIST =
     \\      "name": "memory_stats",
     \\      "description": "Report palace statistics: how many wings, rooms, drawers, and entities are stored.",
     \\      "inputSchema": { "type": "object", "properties": {} }
+    \\    },
+    \\    {
+    \\      "name": "memory_promote",
+    \\      "description": "Make a scratch memory durable: clears its expiry so it survives dream cleanup. Use when a scratch memory (memory_store with scratch=true) turned out to be worth keeping.",
+    \\      "inputSchema": {
+    \\        "type": "object",
+    \\        "properties": {
+    \\          "id": { "type": "integer", "description": "Drawer id of the scratch memory (from memory_store / memory_search)." }
+    \\        },
+    \\        "required": ["id"]
+    \\      }
     \\    }
     \\  ]
     \\}
@@ -185,6 +199,7 @@ pub fn serve(allocator: Allocator, cfg: *const config.Config, io: std.Io) !void 
     };
     defer database.close();
     database.createPalaceSchema();
+    fleet.ensureColumns(&database);
 
     var pal = palace.Palace.init(&database, allocator);
 
@@ -331,8 +346,29 @@ fn dispatchTool(
         const content = getStr(args, "content") orelse return error.MissingContent;
         const wing = getStr(args, "wing") orelse cfg.default_wing;
         const room = getStr(args, "room") orelse "notes";
+        const source = fleet.resolveSource(getStr(args, "source"), "agent");
+        const scratch = getBool(args, "scratch") orelse false;
+        // Content-hash dedup returns the ORIGINAL drawer id — never stamp a
+        // scratch expiry onto a pre-existing durable memory.
+        var was_new = true;
+        {
+            var hash_buf: [64]u8 = undefined;
+            if (palace.Palace.contentHashHex(content, &hash_buf)) |hex| {
+                was_new = !pal.hasContentHash(hex);
+            } else |_| {}
+        }
         const id = try miner.storeMemory(pal, content, wing, room, "agent", allocator);
-        return .{ .text = try std.fmt.allocPrint(allocator, "Stored memory #{d} in {s}/{s}.", .{ id, wing, room }) };
+        fleet.setDrawerSource(database, id, source);
+        if (scratch and was_new) {
+            const ttl = fleet.scratchTtlSeconds();
+            fleet.stampScratch(database, id, ttl);
+            return .{ .text = try std.fmt.allocPrint(
+                allocator,
+                "Stored scratch memory #{d} in {s}/{s} (source: {s}; expires in ~{d}h unless memory_promote'd).",
+                .{ id, wing, room, source, @divTrunc(ttl, 3600) },
+            ) };
+        }
+        return .{ .text = try std.fmt.allocPrint(allocator, "Stored memory #{d} in {s}/{s} (source: {s}).", .{ id, wing, room, source }) };
     } else if (std.mem.eql(u8, name, "memory_forget")) {
         // The id is required; accept an out-of-range value gracefully (it simply
         // matches nothing) rather than treating it as UB.
@@ -391,6 +427,14 @@ fn dispatchTool(
         return .{ .text = try dream_mod.formatReport(report, allocator) };
     } else if (std.mem.eql(u8, name, "memory_stats")) {
         return .{ .text = try pal.stats(allocator) };
+    } else if (std.mem.eql(u8, name, "memory_promote")) {
+        const pid = getInt(args, "id") orelse return error.MissingId;
+        const text = switch (fleet.promote(database, pid)) {
+            .promoted => try std.fmt.allocPrint(allocator, "Memory #{d} promoted — expiry cleared, now durable.", .{pid}),
+            .already_durable => try std.fmt.allocPrint(allocator, "Memory #{d} is already durable (no expiry set).", .{pid}),
+            .not_found => try std.fmt.allocPrint(allocator, "No memory #{d} found to promote.", .{pid}),
+        };
+        return .{ .text = text };
     }
     return .{ .text = try std.fmt.allocPrint(allocator, "Unknown tool: {s}", .{name}) };
 }
@@ -816,6 +860,16 @@ fn getStr(args: ?std.json.Value, key: []const u8) ?[]const u8 {
     const v = a.object.get(key) orelse return null;
     return switch (v) {
         .string => |s| if (s.len > 0) s else null,
+        else => null,
+    };
+}
+
+fn getBool(args: ?std.json.Value, key: []const u8) ?bool {
+    const a = args orelse return null;
+    if (a != .object) return null;
+    const v = a.object.get(key) orelse return null;
+    return switch (v) {
+        .bool => |b| b,
         else => null,
     };
 }
