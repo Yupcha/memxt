@@ -16,6 +16,7 @@ const hooks = @import("hooks.zig");
 const inspect_mod = @import("inspect.zig");
 const dream_mod = @import("dream.zig");
 const serve_mod = @import("serve.zig");
+const telemetry = @import("telemetry.zig");
 
 const c_env = @cImport({
     @cInclude("stdlib.h");
@@ -316,6 +317,12 @@ fn cmdSearch(args_it: *std.process.Args.Iterator, cfg: *const config.Config, all
             std.debug.print("No results found in the palace.\n", .{});
         }
         return;
+    }
+
+    // Usage telemetry: these drawer ids were surfaced (best-effort;
+    // facts mode returns fact ids, not drawers).
+    if (mode != .facts) {
+        for (results) |res| telemetry.recordSurfaced(&database, res.drawer_id);
     }
 
     switch (format) {
@@ -1321,5 +1328,6 @@ test "memxt unified testing suite" {
     _ = @import("quant.zig");
     _ = @import("fleet.zig");
     _ = @import("packer.zig");
+    _ = @import("telemetry.zig");
 }
 
