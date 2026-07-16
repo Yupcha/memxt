@@ -110,21 +110,62 @@ pub fn generate(database: *db.Database, wing_filter: ?[]const u8, allocator: All
     return out.toOwnedSlice(allocator);
 }
 
-/// Budget-aware variant: assemble the normal L0/L1/L2 brief, then fit it to
-/// `budget_tokens` through the packer. The packer trims from the end at
-/// line/sentence boundaries, so layers keep priority order L0 > L1 > L2.
-/// A null budget keeps default behavior (identical to `generate`).
+/// Budget-aware variant: take the wake brief (daemon cache when fresh, live
+/// assembly otherwise), then fit it to `budget_tokens` through the packer.
+/// The packer trims from the end at line/sentence boundaries, so layers keep
+/// priority order L0 > L1 > L2. A null budget keeps default behavior
+/// (identical to `generateCached`).
 pub fn generateBudgeted(
     database: *db.Database,
     wing_filter: ?[]const u8,
     budget_tokens: ?usize,
     allocator: Allocator,
 ) ![]u8 {
-    const full = try generate(database, wing_filter, allocator);
+    const full = try generateCached(database, wing_filter, allocator);
     const budget = budget_tokens orelse return full;
     if (packer.estimateTokens(full) <= budget) return full;
     defer allocator.free(full);
     return packer.fitToBudget(full, budget, allocator);
+}
+
+/// Serve the wake brief from the dream daemon's precomputed cache when fresh
+/// (younger than the daemon interval), falling back to live assembly. The
+/// wake_cache table only exists once `memxt dream --daemon` has run; a missing
+/// table simply means "no cache" and we assemble live.
+pub fn generateCached(database: *db.Database, wing_filter: ?[]const u8, allocator: Allocator) ![]u8 {
+    if (cachedBrief(database, wing_filter, allocator)) |brief| return brief;
+    return generate(database, wing_filter, allocator);
+}
+
+fn cachedBrief(database: *db.Database, wing_filter: ?[]const u8, allocator: Allocator) ?[]u8 {
+    // prepare fails when wake_cache doesn't exist yet → fall back to live.
+    const stmt = database.prepare(
+        \\SELECT brief FROM wake_cache
+        \\WHERE wing = ? AND generated_at > strftime('%s','now') - ?
+    ) orelse return null;
+    defer db.finalize(stmt);
+    db.bindText(stmt, 1, wing_filter orelse ""); // global brief cached under ''
+    db.bindInt64(stmt, 2, cacheMaxAgeSecs(database));
+    if (db.step(stmt) != db.c.SQLITE_ROW) return null;
+    const brief = db.columnText(stmt, 0) orelse return null;
+    if (brief.len == 0) return null;
+    return allocator.dupe(u8, brief) catch null;
+}
+
+/// "Fresh" = younger than the daemon's cycle interval (stamped in config by
+/// dreamd). Defaults to 60 minutes when the daemon never recorded one.
+fn cacheMaxAgeSecs(database: *db.Database) i64 {
+    const stmt = database.prepare("SELECT value FROM config WHERE key = 'dreamd_interval_mins'") orelse return 3600;
+    defer db.finalize(stmt);
+    if (db.step(stmt) != db.c.SQLITE_ROW) return 3600;
+    const v = db.columnText(stmt, 0) orelse return 3600;
+    const mins = std.fmt.parseInt(i64, v, 10) catch return 3600;
+    return std.math.clamp(mins, 1, 24 * 60) * 60;
+}
+
+/// Test seam: expose the cache lookup without the live-assembly fallback.
+pub fn cachedBriefForTest(database: *db.Database, wing_filter: ?[]const u8, allocator: Allocator) ?[]u8 {
+    return cachedBrief(database, wing_filter, allocator);
 }
 
 /// Profile-ish rooms and source types: decisions, conventions, profile, notes from agent.

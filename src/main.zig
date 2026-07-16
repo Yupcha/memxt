@@ -15,6 +15,7 @@ const wakeup = @import("wakeup.zig");
 const hooks = @import("hooks.zig");
 const inspect_mod = @import("inspect.zig");
 const dream_mod = @import("dream.zig");
+const dreamd_mod = @import("dreamd.zig");
 const serve_mod = @import("serve.zig");
 const telemetry = @import("telemetry.zig");
 const procedures_mod = @import("procedures.zig");
@@ -133,6 +134,9 @@ fn printUsage() void {
         \\    memxt wake-up [--wing NAME] [--budget TOKENS]  L0+L1+L2 continuity brief
         \\    memxt inspect                        Palace health (facts, profile, kinds)
         \\    memxt dream [--budget N] [--dry-run] Consolidate: demote cold, clusters, expire
+        \\    memxt dream --daemon [--interval M]  Background consolidator (sleep-time compute)
+        \\    memxt dream --status                 Daemon liveness + last-cycle summary
+        \\    memxt dream --contradictions         List flagged fact contradictions
         \\    memxt forget <id|--wing NAME>        Evict a drawer or whole wing
         \\    memxt export [path] [--wing NAME]    JSONL dump
         \\    memxt import <path>                  Re-ingest a JSONL export
@@ -419,8 +423,28 @@ fn cmdServe(args_it: *std.process.Args.Iterator, cfg: *const config.Config, allo
 
 fn cmdDream(args_it: *std.process.Args.Iterator, cfg: *const config.Config, allocator: std.mem.Allocator) !void {
     var opts = dream_mod.DreamOptions{};
+    var daemon = false;
+    var status = false;
+    var contradictions = false;
+    var interval_mins: u32 = 60;
     while (args_it.next()) |arg| {
-        if (std.mem.eql(u8, arg, "--budget")) {
+        if (std.mem.eql(u8, arg, "--daemon")) {
+            daemon = true;
+        } else if (std.mem.eql(u8, arg, "--status")) {
+            status = true;
+        } else if (std.mem.eql(u8, arg, "--contradictions")) {
+            contradictions = true;
+        } else if (std.mem.eql(u8, arg, "--interval")) {
+            const v = args_it.next() orelse {
+                std.debug.print("--interval requires minutes\n", .{});
+                return;
+            };
+            interval_mins = std.fmt.parseInt(u32, v, 10) catch {
+                std.debug.print("Invalid --interval '{s}'\n", .{v});
+                return;
+            };
+            interval_mins = std.math.clamp(interval_mins, 1, 24 * 60);
+        } else if (std.mem.eql(u8, arg, "--budget")) {
             const v = args_it.next() orelse {
                 std.debug.print("--budget requires a number\n", .{});
                 return;
@@ -436,14 +460,29 @@ fn cmdDream(args_it: *std.process.Args.Iterator, cfg: *const config.Config, allo
         } else if (std.mem.eql(u8, arg, "--no-clusters")) {
             opts.build_clusters = false;
         } else if (std.mem.startsWith(u8, arg, "-")) {
-            std.debug.print("Usage: memxt dream [--budget N] [--dry-run] [--wing NAME] [--no-clusters]\n", .{});
+            std.debug.print("Usage: memxt dream [--budget N] [--dry-run] [--wing NAME] [--no-clusters]\n" ++
+                "       memxt dream --daemon [--interval MINS] | --status | --contradictions\n", .{});
             return;
         }
+    }
+
+    if (status) {
+        try dreamd_mod.printStatus(cfg, allocator);
+        return;
+    }
+    if (daemon) {
+        try dreamd_mod.runDaemon(cfg, .{ .interval_mins = interval_mins, .dream = opts }, allocator);
+        return;
     }
 
     var database = try openDb(cfg);
     defer database.close();
     database.createPalaceSchema();
+
+    if (contradictions) {
+        try dreamd_mod.printContradictions(&database, allocator);
+        return;
+    }
 
     // Clusters benefit from embeddings when model can load.
     embedder.initGlobal(cfg.model_path) catch {};
@@ -766,7 +805,12 @@ fn cmdWakeUp(args_it: *std.process.Args.Iterator, cfg: *const config.Config, all
     defer database.close();
     database.createPalaceSchema();
 
+<<<<<<< HEAD
     const context = try wakeup.generateBudgeted(&database, wing, budget, allocator);
+=======
+    // Precomputed by the dream daemon when fresh; live assembly otherwise.
+    const context = try wakeup.generateCached(&database, wing, allocator);
+>>>>>>> worktree-agent-a4714c872c677c436
     defer allocator.free(context);
 
     std.debug.print("{s}", .{context});
@@ -1408,9 +1452,13 @@ fn jsonObjStr(obj: std.json.ObjectMap, key: []const u8) ?[]const u8 {
 test "memxt unified testing suite" {
     _ = @import("db.zig");
     _ = @import("quant.zig");
+<<<<<<< HEAD
     _ = @import("fleet.zig");
     _ = @import("packer.zig");
     _ = @import("telemetry.zig");
     _ = @import("procedures.zig");
+=======
+    _ = @import("dreamd.zig");
+>>>>>>> worktree-agent-a4714c872c677c436
 }
 

@@ -27,6 +27,8 @@ pub fn render(database: *db.Database, db_path: []const u8, allocator: Allocator)
     const profile_n = profile.countActive(database);
     const vec_n = countSql(database, "SELECT COUNT(*) FROM vec_drawers");
     const quant_n = countSql(database, "SELECT COUNT(*) FROM vec_quant");
+    // Table exists only after `dream --daemon` has run; missing → 0.
+    const contradiction_n = countSql(database, "SELECT COUNT(*) FROM contradictions");
     const schema_v = database.schemaVersion();
 
     const size_mb = fileSizeMb(db_path);
@@ -50,6 +52,7 @@ pub fn render(database: *db.Database, db_path: []const u8, allocator: Allocator)
         \\║  Facts (active):  {d:>8}                           ║
         \\║  Facts (closed):  {d:>8}  (superseded)            ║
         \\║  Profile entries: {d:>8}                           ║
+        \\║  Contradictions:  {d:>8}  (dream --contradictions)║
         \\║  KG entities:     {d:>8}                           ║
         \\║  KG relations:    {d:>8}                           ║
         \\
@@ -65,6 +68,7 @@ pub fn render(database: *db.Database, db_path: []const u8, allocator: Allocator)
         @as(u64, @intCast(@max(0, fact_active))),
         @as(u64, @intCast(@max(0, fact_closed))),
         @as(u64, @intCast(@max(0, profile_n))),
+        @as(u64, @intCast(@max(0, contradiction_n))),
         @as(u64, @intCast(@max(0, entity_n))),
         @as(u64, @intCast(@max(0, rel_n))),
     });
