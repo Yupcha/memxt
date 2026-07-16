@@ -34,6 +34,7 @@ const fleet = @import("fleet.zig");
 const packer = @import("packer.zig");
 const telemetry = @import("telemetry.zig");
 const procedures_mod = @import("procedures.zig");
+const anchors_mod = @import("anchors.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -49,7 +50,7 @@ const TOOLS_LIST =
     \\  "tools": [
     \\    {
     \\      "name": "memory_search",
-    \\      "description": "Hybrid semantic + keyword search of the local memory palace. DEFAULT detail=index returns a compact index (~id, path, ~100-char snippet) so you can filter before loading full text — progressive disclosure saves tokens. Use BEFORE answering about prior work. Then call memory_get on promising ids.",
+    \\      "description": "Hybrid semantic + keyword search of the local memory palace. DEFAULT detail=index returns a compact index (~id, path, ~100-char snippet) so you can filter before loading full text — progressive disclosure saves tokens. Hits anchored to files that changed since storage are tagged [stale] — treat those with suspicion. Use BEFORE answering about prior work. Then call memory_get on promising ids.",
     \\      "inputSchema": {
     \\        "type": "object",
     \\        "properties": {
@@ -66,7 +67,7 @@ const TOOLS_LIST =
     \\    },
     \\    {
     \\      "name": "memory_get",
-    \\      "description": "Fetch full verbatim memory body by drawer id(s). Use AFTER memory_search (detail=index) when a hit looks relevant. Batch multiple ids in one call.",
+    \\      "description": "Fetch full verbatim memory body by drawer id(s). Use AFTER memory_search (detail=index) when a hit looks relevant. Batch multiple ids in one call. Memories whose anchored files changed since storage are prefixed with a staleness warning.",
     \\      "inputSchema": {
     \\        "type": "object",
     \\        "properties": {
@@ -217,6 +218,7 @@ pub fn serve(allocator: Allocator, cfg: *const config.Config, io: std.Io) !void 
     defer database.close();
     database.createPalaceSchema();
     fleet.ensureColumns(&database);
+    anchors_mod.ensureTables(&database);
 
     var pal = palace.Palace.init(&database, allocator);
 
@@ -514,6 +516,14 @@ fn toolSearch(
 
     if (budget_tokens) |bt| return toolSearchPacked(allocator, results, bt);
 
+    // Grounding: cheap staleness check — only for the hits being returned.
+    const fresh = try allocator.alloc(anchors_mod.Freshness, results.len);
+    defer allocator.free(fresh);
+    for (results, 0..) |r, i| {
+        fresh[i] = if (r.drawer_id > 0) anchors_mod.freshness(pal.database, r.drawer_id, allocator) else .unanchored;
+    }
+
+
     var out: std.ArrayListUnmanaged(u8) = .empty;
     errdefer out.deinit(allocator);
 
@@ -524,8 +534,9 @@ fn toolSearch(
         defer allocator.free(header);
         try out.appendSlice(allocator, header);
         for (results, 0..) |r, i| {
-            const block = try std.fmt.allocPrint(allocator, "{d}. [#{d} {s}/{s}] {s}\n{s}\n\n", .{
-                i + 1, r.drawer_id, r.wing_name, r.room_name, r.source_path, r.content,
+            const mark: []const u8 = if (fresh[i] == .stale) " [stale]" else "";
+            const block = try std.fmt.allocPrint(allocator, "{d}. [#{d} {s}/{s}] {s}{s}\n{s}\n\n", .{
+                i + 1, r.drawer_id, r.wing_name, r.room_name, r.source_path, mark, r.content,
             });
             defer allocator.free(block);
             try out.appendSlice(allocator, block);
@@ -540,9 +551,10 @@ fn toolSearch(
         defer allocator.free(header);
         try out.appendSlice(allocator, header);
         for (results, 0..) |r, i| {
+            const mark: []const u8 = if (fresh[i] == .stale) " [stale]" else "";
             const snip = snippetOf(r.content, INDEX_SNIPPET_CHARS);
-            const block = try std.fmt.allocPrint(allocator, "{d}. #{d}  [{s}/{s}]  {s}\n   {s}\n", .{
-                i + 1, r.drawer_id, r.wing_name, r.room_name, r.source_path, snip,
+            const block = try std.fmt.allocPrint(allocator, "{d}. #{d}  [{s}/{s}]  {s}{s}\n   {s}\n", .{
+                i + 1, r.drawer_id, r.wing_name, r.room_name, r.source_path, mark, snip,
             });
             defer allocator.free(block);
             try out.appendSlice(allocator, block);
@@ -557,6 +569,7 @@ fn toolSearch(
         score: f64,
         content: []const u8,
         detail: []const u8,
+        freshness: []const u8,
     };
     const hits = try allocator.alloc(Hit, results.len);
     defer allocator.free(hits);
@@ -580,6 +593,7 @@ fn toolSearch(
             .score = r.score,
             .content = body,
             .detail = if (full) "full" else "index",
+            .freshness = fresh[i].name(),
         };
     }
     const structured = try std.json.Stringify.valueAlloc(allocator, .{ .results = hits }, .{});
@@ -679,6 +693,7 @@ fn toolGet(allocator: Allocator, pal: *palace.Palace, args: ?std.json.Value) !To
         source: []const u8,
         kind: []const u8,
         content: []const u8,
+        freshness: []const u8,
     };
     var hits_list: std.ArrayListUnmanaged(Hit) = .empty;
     defer hits_list.deinit(allocator);
@@ -702,6 +717,19 @@ fn toolGet(allocator: Allocator, pal: *palace.Palace, args: ?std.json.Value) !To
         found += 1;
         // Usage telemetry: the agent actually opened this drawer (best-effort).
         telemetry.recordFetched(pal.database, d.id);
+
+        // Grounding: verify this drawer's anchors; warn when the evidence moved.
+        var vr = anchors_mod.verifyAnchors(pal.database, d.id, allocator) catch anchors_mod.VerifyResult{};
+        defer vr.deinit(allocator);
+        if (vr.freshness == .stale) {
+            try out.appendSlice(allocator, "⚠ anchored file(s) changed since this was stored: ");
+            for (vr.stale_paths, 0..) |p, pi| {
+                if (pi > 0) try out.appendSlice(allocator, ", ");
+                try out.appendSlice(allocator, p);
+            }
+            try out.append(allocator, '\n');
+        }
+
         const block = try std.fmt.allocPrint(allocator, "### #{d} [{s}/{s}] {s}\n{s}\n\n", .{
             d.id, d.wing, d.room, d.source_path, d.content,
         });
@@ -714,6 +742,7 @@ fn toolGet(allocator: Allocator, pal: *palace.Palace, args: ?std.json.Value) !To
             .source = d.source_path,
             .kind = d.kind,
             .content = d.content,
+            .freshness = vr.freshness.name(),
         });
     }
 
