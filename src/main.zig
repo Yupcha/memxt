@@ -126,7 +126,7 @@ fn printUsage() void {
         \\    memxt mine <path> [wing]             Mine files (incremental)
         \\    memxt search <query> [options]       Hybrid FTS + vector search
         \\         --limit N  --wing NAME  --format plain|json|md
-        \\    memxt wake-up [--wing NAME]          L0+L1+L2 continuity brief
+        \\    memxt wake-up [--wing NAME] [--budget TOKENS]  L0+L1+L2 continuity brief
         \\    memxt inspect                        Palace health (facts, profile, kinds)
         \\    memxt dream [--budget N] [--dry-run] Consolidate: demote cold, clusters, expire
         \\    memxt forget <id|--wing NAME>        Evict a drawer or whole wing
@@ -721,14 +721,25 @@ fn cmdKnowledgeGraph(subject: ?[:0]const u8, cfg: *const config.Config, allocato
 
 fn cmdWakeUp(args_it: *std.process.Args.Iterator, cfg: *const config.Config, allocator: std.mem.Allocator) !void {
     var wing: ?[]const u8 = null;
+    var budget: ?usize = null;
     while (args_it.next()) |arg| {
         if (std.mem.eql(u8, arg, "--wing")) {
             wing = args_it.next() orelse {
                 std.debug.print("--wing requires a name\n", .{});
                 return;
             };
+        } else if (std.mem.eql(u8, arg, "--budget")) {
+            const v = args_it.next() orelse {
+                std.debug.print("--budget requires a token count\n", .{});
+                return;
+            };
+            budget = std.fmt.parseInt(usize, v, 10) catch {
+                std.debug.print("Invalid token budget '{s}'. Use a positive number.\n", .{v});
+                return;
+            };
+            if (budget.? == 0) budget = null;
         } else if (std.mem.startsWith(u8, arg, "-")) {
-            std.debug.print("Unknown flag '{s}'. Usage: memxt wake-up [--wing NAME]\n", .{arg});
+            std.debug.print("Unknown flag '{s}'. Usage: memxt wake-up [--wing NAME] [--budget TOKENS]\n", .{arg});
             return;
         } else {
             // Positional wing for backward compat: `wake-up my-project`
@@ -744,7 +755,7 @@ fn cmdWakeUp(args_it: *std.process.Args.Iterator, cfg: *const config.Config, all
     defer database.close();
     database.createPalaceSchema();
 
-    const context = try wakeup.generate(&database, wing, allocator);
+    const context = try wakeup.generateBudgeted(&database, wing, budget, allocator);
     defer allocator.free(context);
 
     std.debug.print("{s}", .{context});
@@ -1309,5 +1320,6 @@ test "memxt unified testing suite" {
     _ = @import("db.zig");
     _ = @import("quant.zig");
     _ = @import("fleet.zig");
+    _ = @import("packer.zig");
 }
 
