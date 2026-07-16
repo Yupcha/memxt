@@ -28,6 +28,7 @@ const miner = @import("miner.zig");
 const embedder = @import("embedder.zig");
 const wakeup = @import("wakeup.zig");
 const config = @import("config.zig");
+const fleet = @import("fleet.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -143,10 +144,16 @@ fn handleTranscriptSave(
     // Local MiniLM only — never call a cloud LLM to "compress" the session.
     embedder.initGlobal(cfg.model_path) catch {};
 
+    // Fleet attribution: hooks are the Claude Code harness writing, unless a
+    // subagent/harness pinned its own identity via MEMXT_SOURCE.
+    fleet.ensureColumns(database);
+    const writer = fleet.resolveSource(null, "claude-code");
+
     var pal = palace.Palace.init(database, allocator);
     // Episodic: room=sessions → kind=episode; storeMemory also runs heuristic
     // fact extract. Content-hash dedup skips identical tails.
-    _ = miner.storeMemory(&pal, tail, cfg.default_wing, "sessions", opts.source, allocator) catch return;
+    const episode_id = miner.storeMemory(&pal, tail, cfg.default_wing, "sessions", opts.source, allocator) catch return;
+    fleet.setDrawerSource(database, episode_id, writer);
 
     if (!opts.pin_decisions) return;
     if (looksLikeDecision(tail)) {
@@ -156,7 +163,9 @@ fn handleTranscriptSave(
             "stop-decision"
         else
             "precompact-decision";
-        _ = miner.storeMemory(&pal, snippet, cfg.default_wing, "decisions", src_tag, allocator) catch {};
+        if (miner.storeMemory(&pal, snippet, cfg.default_wing, "decisions", src_tag, allocator)) |decision_id| {
+            fleet.setDrawerSource(database, decision_id, writer);
+        } else |_| {}
     }
 }
 

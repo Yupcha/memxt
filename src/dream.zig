@@ -10,6 +10,7 @@ const db = @import("db.zig");
 const palace_mod = @import("palace.zig");
 const facts_mod = @import("facts.zig");
 const embedder = @import("embedder.zig");
+const fleet = @import("fleet.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -28,6 +29,7 @@ pub const DreamOptions = struct {
 
 pub const DreamReport = struct {
     facts_expired: u32 = 0,
+    scratch_purged: u32 = 0,
     demoted: u32 = 0,
     clusters_built: u32 = 0,
     hot_before: i64 = 0,
@@ -45,6 +47,11 @@ pub fn run(database: *db.Database, opts: DreamOptions, allocator: Allocator) !Dr
 
     // 1) Expire stale facts
     report.facts_expired = facts_mod.expireStale(database);
+
+    // 1b) Purge expired scratch drawers (fleet scratch tier — unpromoted
+    //     session-scoped memories past their expires_at).
+    fleet.ensureColumns(database);
+    report.scratch_purged = fleet.purgeExpiredScratch(&pal, opts.dry_run);
 
     // 2) Demote old low-access episodes
     report.demoted += try demoteOldEpisodes(database, &pal, opts);
@@ -78,6 +85,7 @@ pub fn formatReport(report: DreamReport, allocator: Allocator) ![]u8 {
         \\║  Quantized (cold):  {d:>8}  (TurboQuant)  ║
         \\║  Demoted to cold:   {d:>8}                ║
         \\║  Facts expired:     {d:>8}                ║
+        \\║  Scratch purged:    {d:>8}                ║
         \\║  Clusters built:    {d:>8}                ║
         \\╚══════════════════════════════════════════╝
         \\
@@ -91,6 +99,7 @@ pub fn formatReport(report: DreamReport, allocator: Allocator) ![]u8 {
         @as(u64, @intCast(@max(0, report.quant_count))),
         report.demoted,
         report.facts_expired,
+        report.scratch_purged,
         report.clusters_built,
     });
 }

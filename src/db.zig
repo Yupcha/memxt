@@ -74,7 +74,15 @@ pub const Database = struct {
 
     pub fn exec(self: *Database, sql: [*:0]const u8) void {
         var err_msg: [*c]u8 = null;
-        if (c.sqlite3_exec(self.handle, sql, null, null, &err_msg) != SQLITE_OK) {
+        var rc = c.sqlite3_exec(self.handle, sql, null, null, &err_msg);
+        if (rc == c.SQLITE_BUSY or rc == c.SQLITE_LOCKED) {
+            // Another fleet member held the write lock past busy_timeout —
+            // retry once before giving up so shared-palace writes don't drop.
+            if (err_msg != null) c.sqlite3_free(err_msg);
+            err_msg = null;
+            rc = c.sqlite3_exec(self.handle, sql, null, null, &err_msg);
+        }
+        if (rc != SQLITE_OK) {
             std.debug.print("SQL Exec Error on '{s}': {s}\n", .{ sql, err_msg });
             c.sqlite3_free(err_msg);
         }
@@ -267,7 +275,7 @@ pub const Database = struct {
         }
     }
 
-    fn columnExists(self: *Database, table: []const u8, col: []const u8) bool {
+    pub fn columnExists(self: *Database, table: []const u8, col: []const u8) bool {
         // PRAGMA table_info returns rows; we scan for name match.
         var sql_buf: [128]u8 = undefined;
         const sql = std.fmt.bufPrint(&sql_buf, "PRAGMA table_info({s})", .{table}) catch return false;
@@ -446,6 +454,17 @@ pub fn finalize(stmt: ?*Stmt) void {
 }
 
 pub fn step(stmt: ?*Stmt) c_int {
+    return c.sqlite3_step(stmt);
+}
+
+/// Step a write statement, retrying once when another fleet member holds the
+/// write lock. busy_timeout=5000 already waits inside sqlite3_step; this
+/// reset+retry covers the SQLITE_BUSY that can still surface at timeout so a
+/// palace shared by parallel subagents doesn't silently drop a memory.
+pub fn stepRetryBusy(stmt: ?*Stmt) c_int {
+    const rc = c.sqlite3_step(stmt);
+    if (rc != c.SQLITE_BUSY and rc != c.SQLITE_LOCKED) return rc;
+    _ = c.sqlite3_reset(stmt);
     return c.sqlite3_step(stmt);
 }
 
