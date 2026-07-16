@@ -29,6 +29,7 @@ const embedder = @import("embedder.zig");
 const wakeup = @import("wakeup.zig");
 const config = @import("config.zig");
 const fleet = @import("fleet.zig");
+const procedures = @import("procedures.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -150,6 +151,15 @@ fn handleTranscriptSave(
     const writer = fleet.resolveSource(null, "claude-code");
 
     var pal = palace.Palace.init(database, allocator);
+
+    // Procedural memory (additive, cheap, no embedding model): mine repeated
+    // successful Bash sequences from the same transcript. Keyed by session_id
+    // so the same session firing Stop repeatedly never double-counts.
+    if (pal.createWing(cfg.default_wing, "", "memory")) |wing_id| {
+        const session = strField(root, "session_id") orelse tpath;
+        _ = procedures.mineTranscriptFile(database, wing_id, tpath, session, allocator) catch {};
+    } else |_| {}
+
     // Episodic: room=sessions → kind=episode; storeMemory also runs heuristic
     // fact extract. Content-hash dedup skips identical tails.
     const episode_id = miner.storeMemory(&pal, tail, cfg.default_wing, "sessions", opts.source, allocator) catch return;

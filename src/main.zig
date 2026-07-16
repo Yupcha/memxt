@@ -17,6 +17,7 @@ const inspect_mod = @import("inspect.zig");
 const dream_mod = @import("dream.zig");
 const serve_mod = @import("serve.zig");
 const telemetry = @import("telemetry.zig");
+const procedures_mod = @import("procedures.zig");
 
 const c_env = @cImport({
     @cInclude("stdlib.h");
@@ -109,6 +110,8 @@ pub fn main(init: std.process.Init) !void {
         defer embedder.deinitGlobal();
 
         try mcp.serve(allocator, &cfg, init.io);
+    } else if (std.mem.eql(u8, command, "skills")) {
+        try cmdSkills(&args_it, &cfg, allocator);
     } else {
         std.debug.print("Unknown command: {s}\n", .{command});
         printUsage();
@@ -139,6 +142,7 @@ fn printUsage() void {
         \\    memxt serve [--port N]               Localhost monitor UI (127.0.0.1)
         \\    memxt instructions --harness <…>     claude|codex|cursor|grok|zed|generic
         \\    memxt mcp                            MCP server (stdio) for agents
+        \\    memxt skills [--emit [dir]] [--wing X]  Procedural memory → Claude Code skills
         \\
         \\  search options: --mode hybrid|memories|documents|facts|episodes
         \\                  --as-of UNIX_TS   --limit N   --wing NAME   --format …
@@ -997,6 +1001,84 @@ fn cmdHook(cfg: *const config.Config, allocator: std.mem.Allocator) !void {
     try hooks.processHook(&database, cfg, allocator);
 }
 
+/// List stored procedures (procedural memory) and optionally emit them as
+/// Claude Code skill files: `<dir>/<name>/SKILL.md`. Only procedures seen in
+/// ≥2 sessions are emitted; listing shows everything with its count.
+fn cmdSkills(args_it: *std.process.Args.Iterator, cfg: *const config.Config, allocator: std.mem.Allocator) !void {
+    var do_emit = false;
+    var emit_dir: []const u8 = ".claude/skills";
+    var wing: ?[]const u8 = null;
+
+    var pending: ?[:0]const u8 = null;
+    while (true) {
+        const arg = pending orelse (args_it.next() orelse break);
+        pending = null;
+        if (std.mem.eql(u8, arg, "--emit")) {
+            do_emit = true;
+            // Optional directory value; a following flag means "use the default".
+            if (args_it.next()) |v| {
+                if (std.mem.startsWith(u8, v, "-")) pending = v else emit_dir = v;
+            }
+        } else if (std.mem.eql(u8, arg, "--wing")) {
+            wing = args_it.next() orelse {
+                std.debug.print("--wing requires a name\n", .{});
+                return;
+            };
+        } else if (std.mem.startsWith(u8, arg, "-")) {
+            std.debug.print("Usage: memxt skills [--emit [dir]] [--wing NAME]\n", .{});
+            return;
+        } else {
+            std.debug.print("Unexpected argument '{s}'\n", .{arg});
+            return;
+        }
+    }
+
+    var database = try openDb(cfg);
+    defer database.close();
+    database.createPalaceSchema();
+    procedures_mod.ensureTables(&database);
+    var pal = palace.Palace.init(&database, allocator);
+
+    var wing_id: ?i64 = null;
+    if (wing) |w| {
+        wing_id = pal.getWingId(w) orelse {
+            std.debug.print("No wing '{s}' found.\n", .{w});
+            return;
+        };
+    }
+
+    const procs = try procedures_mod.list(&database, .{ .wing_id = wing_id, .limit = 100 }, allocator);
+    defer procedures_mod.freeProcedures(procs, allocator);
+
+    if (procs.len == 0) {
+        std.debug.print("No procedures recorded yet. They accumulate as sessions repeat successful command sequences.\n", .{});
+        return;
+    }
+
+    std.debug.print("🧩 Procedures ({d}):\n\n", .{procs.len});
+    for (procs) |p| {
+        std.debug.print("#{d}  {s}  (wing {s}, seen {d}×)\n", .{ p.id, p.name, p.wing_name, p.times_seen });
+        std.debug.print("    when: {s}\n", .{p.when_to_use});
+        const steps = procedures_mod.renderSteps(p.steps_json, "    ", allocator) catch continue;
+        defer allocator.free(steps);
+        std.debug.print("{s}\n", .{steps});
+    }
+
+    if (do_emit) {
+        var emit_list: std.ArrayListUnmanaged(procedures_mod.Procedure) = .empty;
+        defer emit_list.deinit(allocator);
+        for (procs) |p| {
+            if (p.times_seen >= procedures_mod.EMIT_MIN_SEEN) emit_list.append(allocator, p) catch {};
+        }
+        if (emit_list.items.len == 0) {
+            std.debug.print("Nothing to emit yet — a procedure must be seen in ≥{d} sessions first.\n", .{procedures_mod.EMIT_MIN_SEEN});
+            return;
+        }
+        const n = try procedures_mod.emitSkills(emit_list.items, emit_dir, allocator);
+        std.debug.print("✓ Emitted {d} skill(s) → {s}/<name>/SKILL.md\n", .{ n, emit_dir });
+    }
+}
+
 const Harness = enum {
     claude,
     codex,
@@ -1329,5 +1411,6 @@ test "memxt unified testing suite" {
     _ = @import("fleet.zig");
     _ = @import("packer.zig");
     _ = @import("telemetry.zig");
+    _ = @import("procedures.zig");
 }
 
