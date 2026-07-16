@@ -30,6 +30,7 @@ const wakeup = @import("wakeup.zig");
 const profile_mod = @import("profile.zig");
 const facts_mod = @import("facts.zig");
 const dream_mod = @import("dream.zig");
+const procedures_mod = @import("procedures.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -129,6 +130,18 @@ const TOOLS_LIST =
     \\      "name": "memory_stats",
     \\      "description": "Report palace statistics: how many wings, rooms, drawers, and entities are stored.",
     \\      "inputSchema": { "type": "object", "properties": {} }
+    \\    },
+    \\    {
+    \\      "name": "memory_procedures",
+    \\      "description": "List/search procedural memories: repeated successful command workflows mined from past sessions (how to build, test, deploy in this repo). Fast (~ms), no embedding model. Call when you need to know HOW something is done here.",
+    \\      "inputSchema": {
+    \\        "type": "object",
+    \\        "properties": {
+    \\          "query": { "type": "string", "description": "Substring filter on name/commands/when-to-use (optional)." },
+    \\          "wing": { "type": "string", "description": "Limit to one project/domain wing (defaults to current project)." },
+    \\          "limit": { "type": "integer", "description": "Max results (default 10).", "default": 10 }
+    \\        }
+    \\      }
     \\    }
     \\  ]
     \\}
@@ -391,6 +404,8 @@ fn dispatchTool(
         return .{ .text = try dream_mod.formatReport(report, allocator) };
     } else if (std.mem.eql(u8, name, "memory_stats")) {
         return .{ .text = try pal.stats(allocator) };
+    } else if (std.mem.eql(u8, name, "memory_procedures")) {
+        return toolProcedures(allocator, pal, database, cfg, args);
     }
     return .{ .text = try std.fmt.allocPrint(allocator, "Unknown tool: {s}", .{name}) };
 }
@@ -587,6 +602,56 @@ fn toolGet(allocator: Allocator, pal: *palace.Palace, args: ?std.json.Value) !To
     const structured = try std.json.Stringify.valueAlloc(allocator, .{ .results = hits_list.items }, .{});
     errdefer allocator.free(structured);
     return .{ .text = try out.toOwnedSlice(allocator), .structured = structured };
+}
+
+/// memory_procedures: list/search procedural memories (repeated successful
+/// command workflows). No embedding model — a plain indexed table scan.
+fn toolProcedures(
+    allocator: Allocator,
+    pal: *palace.Palace,
+    database: *db.Database,
+    cfg: *const config.Config,
+    args: ?std.json.Value,
+) !ToolResult {
+    procedures_mod.ensureTables(database);
+
+    const query = getStr(args, "query");
+    const limit: i32 = @intCast(std.math.clamp(getInt(args, "limit") orelse 10, 1, 100));
+    const wing = getStr(args, "wing") orelse blk: {
+        if (!std.mem.eql(u8, cfg.default_wing, "default")) break :blk cfg.default_wing;
+        break :blk null;
+    };
+    var wing_id: ?i64 = null;
+    if (wing) |w| wing_id = pal.getWingId(w); // unknown wing → search all wings
+
+    const procs = try procedures_mod.list(database, .{
+        .wing_id = wing_id,
+        .query = query,
+        .limit = limit,
+    }, allocator);
+    defer procedures_mod.freeProcedures(procs, allocator);
+
+    if (procs.len == 0) {
+        return .{ .text = try allocator.dupe(u8, "No procedures recorded yet. They accumulate as sessions repeat successful command sequences.") };
+    }
+
+    var out: std.ArrayListUnmanaged(u8) = .empty;
+    errdefer out.deinit(allocator);
+    const header = try std.fmt.allocPrint(allocator, "Found {d} procedure(s):\n\n", .{procs.len});
+    defer allocator.free(header);
+    try out.appendSlice(allocator, header);
+    for (procs) |p| {
+        const head = try std.fmt.allocPrint(allocator, "### {s}  (#{d}, wing {s}, seen {d}x)\n{s}\n", .{
+            p.name, p.id, p.wing_name, p.times_seen, p.when_to_use,
+        });
+        defer allocator.free(head);
+        try out.appendSlice(allocator, head);
+        const steps = try procedures_mod.renderSteps(p.steps_json, "", allocator);
+        defer allocator.free(steps);
+        try out.appendSlice(allocator, steps);
+        try out.appendSlice(allocator, "\n");
+    }
+    return .{ .text = try out.toOwnedSlice(allocator) };
 }
 
 /// Accept `id` (int) and/or `ids` (array of int). Caps at ids_buf.len.
