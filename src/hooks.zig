@@ -101,7 +101,7 @@ fn handleSessionStart(database: *db.Database, cfg: *const config.Config, allocat
         cfg.default_wing
     else
         null;
-    const context = wakeup.generate(database, wing, allocator) catch {
+    const context = wakeup.generateCached(database, wing, allocator) catch {
         writeStdout("{}\n");
         return;
     };

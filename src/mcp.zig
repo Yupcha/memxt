@@ -348,7 +348,7 @@ fn dispatchTool(
             if (!std.mem.eql(u8, cfg.default_wing, "default")) break :blk cfg.default_wing;
             break :blk null;
         };
-        return .{ .text = try wakeup.generate(database, wing, allocator) };
+        return .{ .text = try wakeup.generateCached(database, wing, allocator) };
     } else if (std.mem.eql(u8, name, "memory_profile")) {
         const wing_name = getStr(args, "wing") orelse cfg.default_wing;
         const wing_id = pal.getWingId(wing_name) orelse {
@@ -703,7 +703,7 @@ fn handleResourceRead(allocator: Allocator, database: *db.Database, cfg: *const 
     }
 
     const wing: ?[]const u8 = if (!std.mem.eql(u8, cfg.default_wing, "default")) cfg.default_wing else null;
-    const brief = try wakeup.generate(database, wing, allocator);
+    const brief = try wakeup.generateCached(database, wing, allocator);
     defer allocator.free(brief);
 
     const out = try std.json.Stringify.valueAlloc(allocator, .{
