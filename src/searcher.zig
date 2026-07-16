@@ -9,6 +9,7 @@ const std = @import("std");
 const palace_mod = @import("palace.zig");
 const facts_mod = @import("facts.zig");
 const quant = @import("quant.zig");
+const telemetry = @import("telemetry.zig");
 
 const Allocator = std.mem.Allocator;
 const Palace = palace_mod.Palace;
@@ -190,6 +191,10 @@ pub fn searchHybrid(
 
     if (merged.items.len == 0) return try allocator.alloc(SearchResult, 0);
 
+    // Usage-learned relevance: identity when telemetry is empty/absent.
+    var utility = telemetry.UtilityLookup.init(palace.database);
+    defer utility.deinit();
+
     const current_time = c.time(null);
     var keywords: std.ArrayListUnmanaged([]const u8) = .empty;
     defer keywords.deinit(allocator);
@@ -221,6 +226,7 @@ pub fn searchHybrid(
         if (keywords.items.len > 0) {
             score -= options.keyword_boost * (@as(f64, @floatFromInt(matches)) / @as(f64, @floatFromInt(keywords.items.len)));
         }
+        score = utility.boost(h.drawer_id, score);
         try results.append(allocator, .{
             .drawer_id = h.drawer_id,
             .content = try allocator.dupe(u8, h.content),

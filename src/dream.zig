@@ -10,6 +10,7 @@ const db = @import("db.zig");
 const palace_mod = @import("palace.zig");
 const facts_mod = @import("facts.zig");
 const embedder = @import("embedder.zig");
+const telemetry = @import("telemetry.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -48,6 +49,10 @@ pub fn run(database: *db.Database, opts: DreamOptions, allocator: Allocator) !Dr
 
     // 2) Demote old low-access episodes
     report.demoted += try demoteOldEpisodes(database, &pal, opts);
+
+    // 2b) Usage noise: drawers surfaced many times but never fetched over a
+    // long window are preferred demotion candidates (see telemetry.zig).
+    report.demoted += try demoteSurfacedNeverFetched(database, &pal, opts, allocator);
 
     // 3) Hierarchical clusters (extractive summaries) — before budget so we can demote them if over
     if (opts.build_clusters and !opts.dry_run) {
@@ -121,12 +126,53 @@ fn demoteOldEpisodes(database: *db.Database, pal: *palace_mod.Palace, opts: Drea
             // Filter by wing if set — re-check
             if (!drawerInWing(database, id, w)) continue;
         }
+        // Usage-learned: frequently fetched drawers resist demotion.
+        if (telemetry.resistsDemotion(database, id)) continue;
         if (!opts.dry_run) {
             try pal.demoteToCold(id);
         }
         n += 1;
     }
     return n;
+}
+
+/// Demote drawers the agent keeps seeing in search indexes but never opens.
+/// Candidates come from local retrieval telemetry; pinned kinds and
+/// already-cold drawers are skipped.
+fn demoteSurfacedNeverFetched(
+    database: *db.Database,
+    pal: *palace_mod.Palace,
+    opts: DreamOptions,
+    allocator: Allocator,
+) !u32 {
+    const ids = telemetry.noiseCandidates(database, 1000, allocator) catch return 0;
+    defer allocator.free(ids);
+
+    var n: u32 = 0;
+    for (ids) |id| {
+        if (!drawerHotUnpinned(database, id)) continue;
+        if (opts.wing) |w| {
+            if (!drawerInWing(database, id, w)) continue;
+        }
+        if (!opts.dry_run) {
+            try pal.demoteToCold(id);
+        }
+        n += 1;
+    }
+    return n;
+}
+
+/// Still holds a hot f32 vector and is not a pinned kind.
+fn drawerHotUnpinned(database: *db.Database, drawer_id: i64) bool {
+    const stmt = database.prepare(
+        \\SELECT 1 FROM drawers d
+        \\JOIN vec_drawers v ON v.id = d.id
+        \\WHERE d.id = ?
+        \\  AND COALESCE(d.kind, 'document') NOT IN ('decision', 'procedure', 'summary')
+    ) orelse return false;
+    defer db.finalize(stmt);
+    db.bindInt64(stmt, 1, drawer_id);
+    return db.step(stmt) == db.c.SQLITE_ROW;
 }
 
 fn enforceHotBudget(database: *db.Database, pal: *palace_mod.Palace, opts: DreamOptions) !u32 {
@@ -152,6 +198,8 @@ fn enforceHotBudget(database: *db.Database, pal: *palace_mod.Palace, opts: Dream
         if (opts.wing) |w| {
             if (!drawerInWing(database, id, w)) continue;
         }
+        // Usage-learned: frequently fetched drawers resist demotion.
+        if (telemetry.resistsDemotion(database, id)) continue;
         if (!opts.dry_run) {
             try pal.demoteToCold(id);
         }

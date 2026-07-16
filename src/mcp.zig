@@ -30,6 +30,7 @@ const wakeup = @import("wakeup.zig");
 const profile_mod = @import("profile.zig");
 const facts_mod = @import("facts.zig");
 const dream_mod = @import("dream.zig");
+const telemetry = @import("telemetry.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -435,6 +436,12 @@ fn toolSearch(
 
     if (results.len == 0) return .{ .text = try allocator.dupe(u8, "No relevant memories found.") };
 
+    // Usage telemetry: these drawer ids were surfaced to the agent
+    // (best-effort; facts mode returns fact ids, not drawers).
+    if (mode != .facts) {
+        for (results) |r| telemetry.recordSurfaced(pal.database, r.drawer_id);
+    }
+
     var out: std.ArrayListUnmanaged(u8) = .empty;
     errdefer out.deinit(allocator);
 
@@ -562,6 +569,8 @@ fn toolGet(allocator: Allocator, pal: *palace.Palace, args: ?std.json.Value) !To
         try owned.append(allocator, detail);
         const d = &owned.items[owned.items.len - 1];
         found += 1;
+        // Usage telemetry: the agent actually opened this drawer (best-effort).
+        telemetry.recordFetched(pal.database, d.id);
         const block = try std.fmt.allocPrint(allocator, "### #{d} [{s}/{s}] {s}\n{s}\n\n", .{
             d.id, d.wing, d.room, d.source_path, d.content,
         });
