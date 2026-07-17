@@ -6,6 +6,23 @@ Legend: `[x]` done · `[~]` partial · `[ ]` planned
 
 ---
 
+## Phase 0.4 — Next-gen agents (v0.4.0)
+
+Memory as a participant in the agent loop. Built by 7 parallel agents in isolated
+worktrees, merged and verified centrally (44 unit + 14 integration tests, N-writer
+stress bench).
+
+- [x] **Procedural memory** — `procedures` mined from transcript Bash sequences; `memxt skills [--emit]`; `memory_procedures` MCP tool
+- [x] **MCP sampling** — opt-in (`MEMXT_SAMPLING=1`) client-model fact extraction on `memory_store`; zero API keys
+- [x] **MCP resources + annotations** — `memxt://wing/<name>[/room/<name>]` markdown indexes; readOnly/destructive hints per tool
+- [x] **Grounded memory** — `anchors` (path + content hash) on mine/store; `[stale]` tags at recall; `memxt anchors --verify`
+- [x] **Token-budget recall** — `budget_tokens` on memory_search/memory_wake_up; packer with facts-first packing; `wake-up --budget`
+- [x] **Fleet readiness** — WAL + busy-retry writes, `source` attribution, scratch tier + `memory_promote`, `scripts/bench-concurrent.sh`
+- [x] **Usage-learned relevance** — retrieval telemetry, smoothed fetch-through utility, ranking boost, dream promote/decay
+- [x] **Dream daemon** — `dream --daemon|--status|--contradictions`; contradiction detection, near-dup merge, precomputed wake briefs
+
+---
+
 ## Phase 0.3 — Launch (v0.3.0)
 
 - [x] Facts + profiles + supersession + multi-mode search
