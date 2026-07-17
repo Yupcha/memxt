@@ -28,6 +28,7 @@ const c = @cImport({
     @cInclude("signal.h");
     @cInclude("stdio.h");
     @cInclude("stdlib.h");
+    @cInclude("time.h");
     @cInclude("sys/stat.h");
 });
 
@@ -471,7 +472,7 @@ fn lockFilePath(buf: *[std.fs.max_path_bytes]u8) ?[:0]const u8 {
 fn logLine(allocator: Allocator, comptime fmt: []const u8, args: anytype) void {
     const body = std.fmt.allocPrint(allocator, fmt, args) catch return;
     defer allocator.free(body);
-    const line = std.fmt.allocPrint(allocator, "[dreamd ts={d}] {s}", .{ std.time.timestamp(), body }) catch return;
+    const line = std.fmt.allocPrint(allocator, "[dreamd ts={d}] {s}", .{ c.time(null), body }) catch return;
     defer allocator.free(line);
     std.debug.print("{s}\n", .{line});
     appendLogFile(line);
@@ -524,7 +525,7 @@ fn persistCycleSummary(database: *db.Database, report: CycleReport, allocator: A
     setConfig(database, "dreamd_last_summary", summary);
 
     var ts_buf: [24]u8 = undefined;
-    const ts = std.fmt.bufPrint(&ts_buf, "{d}", .{std.time.timestamp()}) catch return;
+    const ts = std.fmt.bufPrint(&ts_buf, "{d}", .{c.time(null)}) catch return;
     setConfig(database, "dreamd_last_cycle_at", ts);
 }
 
