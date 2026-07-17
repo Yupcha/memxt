@@ -14,7 +14,12 @@
 //   memory_dream    — hot/cold consolidation
 //   memory_stats    — palace statistics
 //
-// Plus two prompts (remember / recall) and one resource (the wake-up brief).
+// Plus two prompts (remember / recall), browsable resources (the wake-up
+// brief + one per wing/room, see resources.zig), per-tool annotations
+// (readOnlyHint/destructiveHint/…), and opt-in MCP *sampling*: with
+// MEMXT_SAMPLING=1 and a sampling-capable client, memory_store asks the
+// CLIENT's own model for durable facts (see sampling.zig) — still zero
+// API keys, zero cloud bill of our own.
 // All work happens locally; nothing leaves the machine.
 // ═══════════════════════════════════════════════════════════════════
 
@@ -30,6 +35,8 @@ const wakeup = @import("wakeup.zig");
 const profile_mod = @import("profile.zig");
 const facts_mod = @import("facts.zig");
 const dream_mod = @import("dream.zig");
+const sampling = @import("sampling.zig");
+const resources_mod = @import("resources.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -46,6 +53,7 @@ const TOOLS_LIST =
     \\    {
     \\      "name": "memory_search",
     \\      "description": "Hybrid semantic + keyword search of the local memory palace. DEFAULT detail=index returns a compact index (~id, path, ~100-char snippet) so you can filter before loading full text — progressive disclosure saves tokens. Use BEFORE answering about prior work. Then call memory_get on promising ids.",
+    \\      "annotations": { "title": "Search memory", "readOnlyHint": true, "openWorldHint": false },
     \\      "inputSchema": {
     \\        "type": "object",
     \\        "properties": {
@@ -62,6 +70,7 @@ const TOOLS_LIST =
     \\    {
     \\      "name": "memory_get",
     \\      "description": "Fetch full verbatim memory body by drawer id(s). Use AFTER memory_search (detail=index) when a hit looks relevant. Batch multiple ids in one call.",
+    \\      "annotations": { "title": "Get memory by id", "readOnlyHint": true, "openWorldHint": false },
     \\      "inputSchema": {
     \\        "type": "object",
     \\        "properties": {
@@ -73,6 +82,7 @@ const TOOLS_LIST =
     \\    {
     \\      "name": "memory_store",
     \\      "description": "Persist an important memory for future sessions: a decision and its rationale, a key code snippet, a constraint, a fact about the project or user. Store anything you'd want to remember next time. Content is kept verbatim. Prefer room 'decisions' for architecture choices so they appear in the wake-up profile.",
+    \\      "annotations": { "title": "Store memory", "readOnlyHint": false, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false },
     \\      "inputSchema": {
     \\        "type": "object",
     \\        "properties": {
@@ -86,6 +96,7 @@ const TOOLS_LIST =
     \\    {
     \\      "name": "memory_wake_up",
     \\      "description": "Load the compact wake-up brief: L0 identity + L1 project profile (decisions) + L2 recent work (~600-1200 tokens). Call at the start of a session to recover continuity.",
+    \\      "annotations": { "title": "Wake-up brief", "readOnlyHint": true, "openWorldHint": false },
     \\      "inputSchema": {
     \\        "type": "object",
     \\        "properties": {
@@ -96,6 +107,7 @@ const TOOLS_LIST =
     \\    {
     \\      "name": "memory_forget",
     \\      "description": "Delete a stored memory by its drawer id (the `id` field returned by memory_search). Removes both the content and its vector embedding so it can never surface again. Use when a memory is wrong, stale, or should not be retained.",
+    \\      "annotations": { "title": "Forget memory", "readOnlyHint": false, "destructiveHint": true, "idempotentHint": true, "openWorldHint": false },
     \\      "inputSchema": {
     \\        "type": "object",
     \\        "properties": {
@@ -107,6 +119,7 @@ const TOOLS_LIST =
     \\    {
     \\      "name": "memory_profile",
     \\      "description": "Load the project profile (stable facts and decisions) without semantic search. Fast (~ms), no embedding model. Call when you need who/what/conventions for this project.",
+    \\      "annotations": { "title": "Project profile", "readOnlyHint": true, "openWorldHint": false },
     \\      "inputSchema": {
     \\        "type": "object",
     \\        "properties": {
@@ -117,6 +130,7 @@ const TOOLS_LIST =
     \\    {
     \\      "name": "memory_dream",
     \\      "description": "Run consolidation: expire stale facts, demote cold vectors under budget, build episode clusters. Keeps infinite history while bounding hot search cost.",
+    \\      "annotations": { "title": "Consolidate memory", "readOnlyHint": false, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false },
     \\      "inputSchema": {
     \\        "type": "object",
     \\        "properties": {
@@ -128,6 +142,7 @@ const TOOLS_LIST =
     \\    {
     \\      "name": "memory_stats",
     \\      "description": "Report palace statistics: how many wings, rooms, drawers, and entities are stored.",
+    \\      "annotations": { "title": "Palace stats", "readOnlyHint": true, "openWorldHint": false },
     \\      "inputSchema": { "type": "object", "properties": {} }
     \\    }
     \\  ]
@@ -161,7 +176,11 @@ const PROMPTS_LIST =
     \\}
 ;
 
-// ── Resources (the wake-up brief as an attachable resource) ──
+// ── Resources ──
+//
+// resources/list is served dynamically (wake-up brief + one resource per
+// wing/room — see resources.zig). This static wakeup-only listing is the
+// fallback if the dynamic build fails, so clients always get a valid reply.
 
 const WAKEUP_URI = "memxt://wakeup";
 
@@ -188,27 +207,17 @@ pub fn serve(allocator: Allocator, cfg: *const config.Config, io: std.Io) !void 
 
     var pal = palace.Palace.init(&database, allocator);
 
-    const stdin = std.Io.File.stdin();
-    var line_buf = std.ArrayListUnmanaged(u8).empty;
-    defer line_buf.deinit(allocator);
-    var chunk: [8192]u8 = undefined;
+    // All stdin reads flow through the sampling correlator so a blocking wait
+    // for a sampling/createMessage response can buffer (not drop) unrelated
+    // incoming messages; the loop then drains those before fresh input.
+    var stdio = sampling.StdioStream{ .io = io };
+    var corr = sampling.Correlator.init(allocator, stdio.stream());
+    defer corr.deinit();
 
     while (true) {
-        const n = stdin.readStreaming(io, &.{chunk[0..]}) catch |err| {
-            if (err == error.EndOfStream) break;
-            return err;
-        };
-        if (n == 0) break;
-        try line_buf.appendSlice(allocator, chunk[0..n]);
-
-        while (std.mem.indexOfScalar(u8, line_buf.items, '\n')) |nl| {
-            const line = line_buf.items[0..nl];
-            if (line.len > 0) handleLine(allocator, &pal, &database, cfg, io, line) catch {};
-            // advance past the newline
-            const remaining = line_buf.items.len - (nl + 1);
-            std.mem.copyForwards(u8, line_buf.items[0..remaining], line_buf.items[nl + 1 ..]);
-            line_buf.shrinkRetainingCapacity(remaining);
-        }
+        const line = (try corr.nextLine()) orelse break;
+        defer allocator.free(line);
+        if (line.len > 0) handleLine(allocator, &pal, &database, cfg, io, &corr, line) catch {};
     }
 }
 
@@ -218,6 +227,7 @@ fn handleLine(
     database: *db.Database,
     cfg: *const config.Config,
     io: std.Io,
+    corr: *sampling.Correlator,
     line: []const u8,
 ) !void {
     var parsed = std.json.parseFromSlice(RpcRequest, allocator, line, .{
@@ -241,6 +251,13 @@ fn handleLine(
                 if (pp.object.get("protocolVersion")) |pv| {
                     if (pv == .string and isSafeVersion(pv.string)) version = pv.string;
                 }
+                // Remember whether the client can serve sampling/createMessage
+                // — presence of the capability key is the spec's signal.
+                if (pp.object.get("capabilities")) |caps| {
+                    if (caps == .object and caps.object.get("sampling") != null) {
+                        corr.client_supports_sampling = true;
+                    }
+                }
             }
         }
         const info = try std.fmt.allocPrint(allocator,
@@ -255,7 +272,7 @@ fn handleLine(
     } else if (std.mem.eql(u8, method, "tools/list")) {
         try sendRawResult(allocator, io, id, TOOLS_LIST);
     } else if (std.mem.eql(u8, method, "tools/call")) {
-        var result = dispatchTool(allocator, pal, database, cfg, io, req.params) catch |err|
+        var result = dispatchTool(allocator, pal, database, cfg, io, corr, req.params) catch |err|
             ToolResult{ .text = try std.fmt.allocPrint(allocator, "Error: {s}", .{@errorName(err)}) };
         defer result.deinit(allocator);
         try sendToolResult(allocator, io, id, result);
@@ -264,9 +281,14 @@ fn handleLine(
     } else if (std.mem.eql(u8, method, "prompts/get")) {
         try handlePromptGet(allocator, io, id, req.params);
     } else if (std.mem.eql(u8, method, "resources/list")) {
-        try sendRawResult(allocator, io, id, RESOURCES_LIST);
+        if (resources_mod.listJson(pal, allocator)) |listing| {
+            defer allocator.free(listing);
+            try sendRawResult(allocator, io, id, listing);
+        } else |_| {
+            try sendRawResult(allocator, io, id, RESOURCES_LIST);
+        }
     } else if (std.mem.eql(u8, method, "resources/read")) {
-        try handleResourceRead(allocator, database, cfg, io, id, req.params);
+        try handleResourceRead(allocator, pal, database, cfg, io, id, req.params);
     } else {
         try sendError(allocator, io, id, -32601, "method not found");
     }
@@ -291,6 +313,7 @@ fn dispatchTool(
     database: *db.Database,
     cfg: *const config.Config,
     io: std.Io,
+    corr: *sampling.Correlator,
     params: ?std.json.Value,
 ) !ToolResult {
     const p = params orelse return error.MissingParams;
@@ -332,6 +355,15 @@ fn dispatchTool(
         const wing = getStr(args, "wing") orelse cfg.default_wing;
         const room = getStr(args, "room") orelse "notes";
         const id = try miner.storeMemory(pal, content, wing, room, "agent", allocator);
+        // Opt-in MCP sampling: the heuristic extraction inside storeMemory
+        // already ran; when the client can sample AND MEMXT_SAMPLING is set,
+        // ask the client's model for extra durable facts. Purely additive —
+        // the verbatim body is untouched, and any failure keeps the
+        // heuristic-only result silently.
+        const sampled = sampleExtraFacts(allocator, pal, corr, content, wing, id);
+        if (sampled > 0) {
+            return .{ .text = try std.fmt.allocPrint(allocator, "Stored memory #{d} in {s}/{s} (+{d} facts via client sampling).", .{ id, wing, room, sampled }) };
+        }
         return .{ .text = try std.fmt.allocPrint(allocator, "Stored memory #{d} in {s}/{s}.", .{ id, wing, room }) };
     } else if (std.mem.eql(u8, name, "memory_forget")) {
         // The id is required; accept an out-of-range value gracefully (it simply
@@ -393,6 +425,28 @@ fn dispatchTool(
         return .{ .text = try pal.stats(allocator) };
     }
     return .{ .text = try std.fmt.allocPrint(allocator, "Unknown tool: {s}", .{name}) };
+}
+
+/// Ask the client's model (MCP sampling) for durable facts about a freshly
+/// stored memory and ingest them through the normal facts pipeline (same
+/// supersession/profile rules as the heuristic path). Returns the number of
+/// facts added; 0 on ANY failure or when sampling is off — never an error,
+/// so memory_store's own success is never at risk.
+fn sampleExtraFacts(
+    allocator: Allocator,
+    pal: *palace.Palace,
+    corr: *sampling.Correlator,
+    content: []const u8,
+    wing_name: []const u8,
+    drawer_id: i64,
+) u32 {
+    if (!corr.client_supports_sampling) return 0;
+    if (!sampling.enabledByEnv()) return 0;
+    const extracted = sampling.extractViaSampling(corr, content, allocator) catch return 0;
+    defer facts_mod.freeExtracted(extracted, allocator);
+    if (extracted.len == 0) return 0;
+    const wing_id = pal.getWingId(wing_name) orelse return 0;
+    return facts_mod.ingestExtracted(pal.database, wing_id, wing_name, drawer_id, extracted, "agent", allocator) catch 0;
 }
 
 const INDEX_SNIPPET_CHARS: usize = 120;
@@ -691,27 +745,37 @@ fn handlePromptGet(allocator: Allocator, io: std.Io, id: std.json.Value, params:
 
 // ── Resources: resources/read ──
 
-fn handleResourceRead(allocator: Allocator, database: *db.Database, cfg: *const config.Config, io: std.Io, id: std.json.Value, params: ?std.json.Value) !void {
+fn handleResourceRead(allocator: Allocator, pal: *palace.Palace, database: *db.Database, cfg: *const config.Config, io: std.Io, id: std.json.Value, params: ?std.json.Value) !void {
     const p = params orelse return sendError(allocator, io, id, -32602, "missing params");
     if (p != .object) return sendError(allocator, io, id, -32602, "missing params");
     const uri = switch (p.object.get("uri") orelse return sendError(allocator, io, id, -32602, "missing uri")) {
         .string => |s| s,
         else => return sendError(allocator, io, id, -32602, "missing uri"),
     };
-    if (!std.mem.eql(u8, uri, WAKEUP_URI)) {
-        return sendError(allocator, io, id, -32602, "unknown resource uri");
+
+    if (std.mem.eql(u8, uri, WAKEUP_URI)) {
+        const wing: ?[]const u8 = if (!std.mem.eql(u8, cfg.default_wing, "default")) cfg.default_wing else null;
+        const brief = try wakeup.generate(database, wing, allocator);
+        defer allocator.free(brief);
+        return sendResourceText(allocator, io, id, uri, "text/plain", brief);
     }
 
-    const wing: ?[]const u8 = if (!std.mem.eql(u8, cfg.default_wing, "default")) cfg.default_wing else null;
-    const brief = try wakeup.generate(database, wing, allocator);
-    defer allocator.free(brief);
+    // memxt://wing/<name>[/room/<name>] — markdown drawer index, no model.
+    if (resources_mod.readMarkdown(pal, uri, allocator) catch null) |md| {
+        defer allocator.free(md);
+        return sendResourceText(allocator, io, id, uri, "text/markdown", md);
+    }
 
+    return sendError(allocator, io, id, -32602, "unknown resource uri");
+}
+
+fn sendResourceText(allocator: Allocator, io: std.Io, id: std.json.Value, uri: []const u8, mime: []const u8, text: []const u8) !void {
     const out = try std.json.Stringify.valueAlloc(allocator, .{
         .jsonrpc = "2.0",
         .id = id,
         .result = .{
             .contents = .{
-                .{ .uri = WAKEUP_URI, .mimeType = "text/plain", .text = brief },
+                .{ .uri = uri, .mimeType = mime, .text = text },
             },
         },
     }, .{});

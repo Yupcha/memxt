@@ -270,7 +270,11 @@ pub const Palace = struct {
             }
         }
 
-        // Resolve room name for kind derivation (best-effort).
+        // Resolve room name for kind derivation (best-effort). Copy it out:
+        // sqlite frees column text at finalize(), so keeping the slice past
+        // the block was a use-after-free that made deriveKind read garbage
+        // and silently classify decision-room drawers as plain memories.
+        var room_name_buf: [128]u8 = undefined;
         var room_name: []const u8 = "notes";
         {
             const rs = self.database.prepare("SELECT name FROM rooms WHERE id = ?") orelse null;
@@ -278,7 +282,11 @@ pub const Palace = struct {
                 defer db.finalize(stmt_r);
                 db.bindInt64(stmt_r, 1, room_id);
                 if (db.step(stmt_r) == db.c.SQLITE_ROW) {
-                    room_name = db.columnText(stmt_r, 0) orelse "notes";
+                    if (db.columnText(stmt_r, 0)) |n| {
+                        const len = @min(n.len, room_name_buf.len);
+                        @memcpy(room_name_buf[0..len], n[0..len]);
+                        room_name = room_name_buf[0..len];
+                    }
                 }
             }
         }
