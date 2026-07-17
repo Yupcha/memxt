@@ -1489,5 +1489,7 @@ test "memxt unified testing suite" {
     _ = @import("procedures.zig");
     _ = @import("dreamd.zig");
     _ = @import("anchors.zig");
+    _ = @import("sampling.zig");
+    _ = @import("resources.zig");
 }
 

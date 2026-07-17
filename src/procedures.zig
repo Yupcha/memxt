@@ -164,7 +164,7 @@ fn isLongHex(tok: []const u8) bool {
 
 /// Commands that are pure exploration/noise, never procedure steps.
 fn isNoiseCommand(cmd: []const u8) bool {
-    const trimmed = std.mem.trimLeft(u8, cmd, " \t");
+    const trimmed = std.mem.trimStart(u8, cmd, " \t");
     var it = std.mem.tokenizeAny(u8, trimmed, " \t\n");
     const head_tok = it.next() orelse return true;
     const head = basenameOf(head_tok);
