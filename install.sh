@@ -143,6 +143,12 @@ main() {
 
   install_binary "$platform"
   install_model
+
+  # Self-check: verifies binary, model, palace, and disk; prints the exact
+  # fix command for anything broken. Never fails the install itself.
+  info "running memxt doctor"
+  "$BIN_DIR/memxt" doctor || warn "doctor found issues — see the fix commands above"
+
   shell_hint
 }
 

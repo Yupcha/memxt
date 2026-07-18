@@ -5,7 +5,7 @@
 class Memxt < Formula
   desc "Local-first long-term memory for AI coding agents"
   homepage "https://github.com/Yupcha/memxt"
-  version "0.3.3"
+  version "0.4.0"
   license "MIT"
 
   on_macos do

@@ -1,6 +1,6 @@
 .{
     .name = .memxt,
-    .version = "0.3.3",
+    .version = "0.4.0",
     .fingerprint = 0x5bf95d78bca15787,
     .minimum_zig_version = "0.16.0",
     .paths = .{
