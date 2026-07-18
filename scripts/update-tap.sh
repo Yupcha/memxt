@@ -10,14 +10,14 @@ SRC="packaging/homebrew/memxt.rb"
 BASE="https://github.com/$REPO/releases/download/v$VERSION"
 
 tmp=$(mktemp); cp "$SRC" "$tmp"
-declare -A MAP=(
-  [REPLACE_DARWIN_AARCH64]=darwin-aarch64
-  [REPLACE_DARWIN_X86_64]=darwin-x86_64
-  [REPLACE_LINUX_AARCH64]=linux-aarch64
-  [REPLACE_LINUX_X86_64]=linux-x86_64
-)
-for ph in "${!MAP[@]}"; do
-  plat="${MAP[$ph]}"
+# Plain pairs, not `declare -A` — macOS ships bash 3.2 without associative arrays.
+for pair in \
+  REPLACE_DARWIN_AARCH64:darwin-aarch64 \
+  REPLACE_DARWIN_X86_64:darwin-x86_64 \
+  REPLACE_LINUX_AARCH64:linux-aarch64 \
+  REPLACE_LINUX_X86_64:linux-x86_64; do
+  ph="${pair%%:*}"
+  plat="${pair#*:}"
   sha=$(curl -fsSL "$BASE/memxt-$plat.tar.gz.sha256" | awk '{print $1}') \
     || { echo "warn: no artifact for $plat (skipping)"; continue; }
   sed -i '' "s/$ph/$sha/" "$tmp" 2>/dev/null || sed -i "s/$ph/$sha/" "$tmp"
