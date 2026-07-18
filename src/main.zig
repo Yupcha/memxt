@@ -15,7 +15,13 @@ const wakeup = @import("wakeup.zig");
 const hooks = @import("hooks.zig");
 const inspect_mod = @import("inspect.zig");
 const dream_mod = @import("dream.zig");
+const dreamd_mod = @import("dreamd.zig");
 const serve_mod = @import("serve.zig");
+const telemetry = @import("telemetry.zig");
+const procedures_mod = @import("procedures.zig");
+const anchors_mod = @import("anchors.zig");
+const demo_mod = @import("demo.zig");
+const doctor_mod = @import("doctor.zig");
 
 const c_env = @cImport({
     @cInclude("stdlib.h");
@@ -59,6 +65,8 @@ pub fn main(init: std.process.Init) !void {
         try cmdSearch(&args_it, &cfg, allocator, init.io);
     } else if (std.mem.eql(u8, command, "stats")) {
         try cmdStats(&cfg, allocator);
+    } else if (std.mem.eql(u8, command, "anchors")) {
+        try cmdAnchors(&args_it, &cfg, allocator);
     } else if (std.mem.eql(u8, command, "inspect")) {
         try cmdInspect(&cfg, allocator);
     } else if (std.mem.eql(u8, command, "adopt")) {
@@ -108,6 +116,15 @@ pub fn main(init: std.process.Init) !void {
         defer embedder.deinitGlobal();
 
         try mcp.serve(allocator, &cfg, init.io);
+    } else if (std.mem.eql(u8, command, "skills")) {
+        try cmdSkills(&args_it, &cfg, allocator);
+    } else if (std.mem.eql(u8, command, "demo")) {
+        defer embedder.deinitGlobal();
+        const keep = if (args_it.next()) |a| std.mem.eql(u8, a, "--keep") else false;
+        try demo_mod.run(&cfg, keep, allocator, init.io);
+    } else if (std.mem.eql(u8, command, "doctor")) {
+        const code = try doctor_mod.run(&cfg, allocator);
+        if (code != 0) std.process.exit(code);
     } else {
         std.debug.print("Unknown command: {s}\n", .{command});
         printUsage();
@@ -120,24 +137,31 @@ fn printUsage() void {
         \\  🏛️  memxt — Long-term memory for Claude Code & coding agents
         \\
         \\  Usage:
+        \\    memxt demo [--keep]                  60-second tour (throwaway palace)
+        \\    memxt doctor                         Self-diagnosis with exact fix commands
         \\    memxt adopt [--no-mine] [--harness all|claude|codex|cursor|grok|zed]
         \\                                         Wire agents + optionally mine cwd
         \\    memxt init                           Initialize palace database
         \\    memxt mine <path> [wing]             Mine files (incremental)
         \\    memxt search <query> [options]       Hybrid FTS + vector search
         \\         --limit N  --wing NAME  --format plain|json|md
-        \\    memxt wake-up [--wing NAME]          L0+L1+L2 continuity brief
+        \\    memxt wake-up [--wing NAME] [--budget TOKENS]  L0+L1+L2 continuity brief
         \\    memxt inspect                        Palace health (facts, profile, kinds)
         \\    memxt dream [--budget N] [--dry-run] Consolidate: demote cold, clusters, expire
+        \\    memxt dream --daemon [--interval M]  Background consolidator (sleep-time compute)
+        \\    memxt dream --status                 Daemon liveness + last-cycle summary
+        \\    memxt dream --contradictions         List flagged fact contradictions
         \\    memxt forget <id|--wing NAME>        Evict a drawer or whole wing
         \\    memxt export [path] [--wing NAME]    JSONL dump
         \\    memxt import <path>                  Re-ingest a JSONL export
         \\    memxt stats                          Palace statistics
+        \\    memxt anchors [--verify] [--wing X]  Anchor health (grounded memory)
         \\    memxt kg [subject]                   Query knowledge graph
         \\    memxt hook                           Claude Code hook (JSON stdin/stdout)
         \\    memxt serve [--port N]               Localhost monitor UI (127.0.0.1)
         \\    memxt instructions --harness <…>     claude|codex|cursor|grok|zed|generic
         \\    memxt mcp                            MCP server (stdio) for agents
+        \\    memxt skills [--emit [dir]] [--wing X]  Procedural memory → Claude Code skills
         \\
         \\  search options: --mode hybrid|memories|documents|facts|episodes
         \\                  --as-of UNIX_TS   --limit N   --wing NAME   --format …
@@ -318,6 +342,12 @@ fn cmdSearch(args_it: *std.process.Args.Iterator, cfg: *const config.Config, all
         return;
     }
 
+    // Usage telemetry: these drawer ids were surfaced (best-effort;
+    // facts mode returns fact ids, not drawers).
+    if (mode != .facts) {
+        for (results) |res| telemetry.recordSurfaced(&database, res.drawer_id);
+    }
+
     switch (format) {
         .json => {
             const Hit = struct {
@@ -376,6 +406,36 @@ fn cmdStats(cfg: *const config.Config, allocator: std.mem.Allocator) !void {
     std.debug.print("{s}\n", .{stat_str});
 }
 
+/// Anchor health: how many drawers are grounded to files on disk, and — with
+/// --verify — how many of those anchors still match the current file content.
+fn cmdAnchors(args_it: *std.process.Args.Iterator, cfg: *const config.Config, allocator: std.mem.Allocator) !void {
+    var wing: ?[]const u8 = null;
+    var do_verify = false;
+
+    while (args_it.next()) |arg| {
+        if (std.mem.eql(u8, arg, "--wing")) {
+            wing = args_it.next() orelse {
+                std.debug.print("--wing requires a name\n", .{});
+                return;
+            };
+        } else if (std.mem.eql(u8, arg, "--verify")) {
+            do_verify = true;
+        } else {
+            std.debug.print("Usage: memxt anchors [--verify] [--wing NAME]\n", .{});
+            return;
+        }
+    }
+
+    var database = try openDb(cfg);
+    defer database.close();
+    database.createPalaceSchema();
+    anchors_mod.ensureTables(&database);
+
+    const report = try anchors_mod.renderReport(&database, wing, do_verify, allocator);
+    defer allocator.free(report);
+    std.debug.print("{s}", .{report});
+}
+
 fn cmdInspect(cfg: *const config.Config, allocator: std.mem.Allocator) !void {
     var database = try openDb(cfg);
     defer database.close();
@@ -408,8 +468,28 @@ fn cmdServe(args_it: *std.process.Args.Iterator, cfg: *const config.Config, allo
 
 fn cmdDream(args_it: *std.process.Args.Iterator, cfg: *const config.Config, allocator: std.mem.Allocator) !void {
     var opts = dream_mod.DreamOptions{};
+    var daemon = false;
+    var status = false;
+    var contradictions = false;
+    var interval_mins: u32 = 60;
     while (args_it.next()) |arg| {
-        if (std.mem.eql(u8, arg, "--budget")) {
+        if (std.mem.eql(u8, arg, "--daemon")) {
+            daemon = true;
+        } else if (std.mem.eql(u8, arg, "--status")) {
+            status = true;
+        } else if (std.mem.eql(u8, arg, "--contradictions")) {
+            contradictions = true;
+        } else if (std.mem.eql(u8, arg, "--interval")) {
+            const v = args_it.next() orelse {
+                std.debug.print("--interval requires minutes\n", .{});
+                return;
+            };
+            interval_mins = std.fmt.parseInt(u32, v, 10) catch {
+                std.debug.print("Invalid --interval '{s}'\n", .{v});
+                return;
+            };
+            interval_mins = std.math.clamp(interval_mins, 1, 24 * 60);
+        } else if (std.mem.eql(u8, arg, "--budget")) {
             const v = args_it.next() orelse {
                 std.debug.print("--budget requires a number\n", .{});
                 return;
@@ -425,14 +505,29 @@ fn cmdDream(args_it: *std.process.Args.Iterator, cfg: *const config.Config, allo
         } else if (std.mem.eql(u8, arg, "--no-clusters")) {
             opts.build_clusters = false;
         } else if (std.mem.startsWith(u8, arg, "-")) {
-            std.debug.print("Usage: memxt dream [--budget N] [--dry-run] [--wing NAME] [--no-clusters]\n", .{});
+            std.debug.print("Usage: memxt dream [--budget N] [--dry-run] [--wing NAME] [--no-clusters]\n" ++
+                "       memxt dream --daemon [--interval MINS] | --status | --contradictions\n", .{});
             return;
         }
+    }
+
+    if (status) {
+        try dreamd_mod.printStatus(cfg, allocator);
+        return;
+    }
+    if (daemon) {
+        try dreamd_mod.runDaemon(cfg, .{ .interval_mins = interval_mins, .dream = opts }, allocator);
+        return;
     }
 
     var database = try openDb(cfg);
     defer database.close();
     database.createPalaceSchema();
+
+    if (contradictions) {
+        try dreamd_mod.printContradictions(&database, allocator);
+        return;
+    }
 
     // Clusters benefit from embeddings when model can load.
     embedder.initGlobal(cfg.model_path) catch {};
@@ -721,14 +816,25 @@ fn cmdKnowledgeGraph(subject: ?[:0]const u8, cfg: *const config.Config, allocato
 
 fn cmdWakeUp(args_it: *std.process.Args.Iterator, cfg: *const config.Config, allocator: std.mem.Allocator) !void {
     var wing: ?[]const u8 = null;
+    var budget: ?usize = null;
     while (args_it.next()) |arg| {
         if (std.mem.eql(u8, arg, "--wing")) {
             wing = args_it.next() orelse {
                 std.debug.print("--wing requires a name\n", .{});
                 return;
             };
+        } else if (std.mem.eql(u8, arg, "--budget")) {
+            const v = args_it.next() orelse {
+                std.debug.print("--budget requires a token count\n", .{});
+                return;
+            };
+            budget = std.fmt.parseInt(usize, v, 10) catch {
+                std.debug.print("Invalid token budget '{s}'. Use a positive number.\n", .{v});
+                return;
+            };
+            if (budget.? == 0) budget = null;
         } else if (std.mem.startsWith(u8, arg, "-")) {
-            std.debug.print("Unknown flag '{s}'. Usage: memxt wake-up [--wing NAME]\n", .{arg});
+            std.debug.print("Unknown flag '{s}'. Usage: memxt wake-up [--wing NAME] [--budget TOKENS]\n", .{arg});
             return;
         } else {
             // Positional wing for backward compat: `wake-up my-project`
@@ -744,7 +850,9 @@ fn cmdWakeUp(args_it: *std.process.Args.Iterator, cfg: *const config.Config, all
     defer database.close();
     database.createPalaceSchema();
 
-    const context = try wakeup.generate(&database, wing, allocator);
+    // Daemon-precomputed brief when fresh (live assembly otherwise), then
+    // fitted to --budget when one was given.
+    const context = try wakeup.generateBudgeted(&database, wing, budget, allocator);
     defer allocator.free(context);
 
     std.debug.print("{s}", .{context});
@@ -977,6 +1085,84 @@ fn cmdHook(cfg: *const config.Config, allocator: std.mem.Allocator) !void {
     defer embedder.deinitGlobal();
 
     try hooks.processHook(&database, cfg, allocator);
+}
+
+/// List stored procedures (procedural memory) and optionally emit them as
+/// Claude Code skill files: `<dir>/<name>/SKILL.md`. Only procedures seen in
+/// ≥2 sessions are emitted; listing shows everything with its count.
+fn cmdSkills(args_it: *std.process.Args.Iterator, cfg: *const config.Config, allocator: std.mem.Allocator) !void {
+    var do_emit = false;
+    var emit_dir: []const u8 = ".claude/skills";
+    var wing: ?[]const u8 = null;
+
+    var pending: ?[:0]const u8 = null;
+    while (true) {
+        const arg = pending orelse (args_it.next() orelse break);
+        pending = null;
+        if (std.mem.eql(u8, arg, "--emit")) {
+            do_emit = true;
+            // Optional directory value; a following flag means "use the default".
+            if (args_it.next()) |v| {
+                if (std.mem.startsWith(u8, v, "-")) pending = v else emit_dir = v;
+            }
+        } else if (std.mem.eql(u8, arg, "--wing")) {
+            wing = args_it.next() orelse {
+                std.debug.print("--wing requires a name\n", .{});
+                return;
+            };
+        } else if (std.mem.startsWith(u8, arg, "-")) {
+            std.debug.print("Usage: memxt skills [--emit [dir]] [--wing NAME]\n", .{});
+            return;
+        } else {
+            std.debug.print("Unexpected argument '{s}'\n", .{arg});
+            return;
+        }
+    }
+
+    var database = try openDb(cfg);
+    defer database.close();
+    database.createPalaceSchema();
+    procedures_mod.ensureTables(&database);
+    var pal = palace.Palace.init(&database, allocator);
+
+    var wing_id: ?i64 = null;
+    if (wing) |w| {
+        wing_id = pal.getWingId(w) orelse {
+            std.debug.print("No wing '{s}' found.\n", .{w});
+            return;
+        };
+    }
+
+    const procs = try procedures_mod.list(&database, .{ .wing_id = wing_id, .limit = 100 }, allocator);
+    defer procedures_mod.freeProcedures(procs, allocator);
+
+    if (procs.len == 0) {
+        std.debug.print("No procedures recorded yet. They accumulate as sessions repeat successful command sequences.\n", .{});
+        return;
+    }
+
+    std.debug.print("🧩 Procedures ({d}):\n\n", .{procs.len});
+    for (procs) |p| {
+        std.debug.print("#{d}  {s}  (wing {s}, seen {d}×)\n", .{ p.id, p.name, p.wing_name, p.times_seen });
+        std.debug.print("    when: {s}\n", .{p.when_to_use});
+        const steps = procedures_mod.renderSteps(p.steps_json, "    ", allocator) catch continue;
+        defer allocator.free(steps);
+        std.debug.print("{s}\n", .{steps});
+    }
+
+    if (do_emit) {
+        var emit_list: std.ArrayListUnmanaged(procedures_mod.Procedure) = .empty;
+        defer emit_list.deinit(allocator);
+        for (procs) |p| {
+            if (p.times_seen >= procedures_mod.EMIT_MIN_SEEN) emit_list.append(allocator, p) catch {};
+        }
+        if (emit_list.items.len == 0) {
+            std.debug.print("Nothing to emit yet — a procedure must be seen in ≥{d} sessions first.\n", .{procedures_mod.EMIT_MIN_SEEN});
+            return;
+        }
+        const n = try procedures_mod.emitSkills(emit_list.items, emit_dir, allocator);
+        std.debug.print("✓ Emitted {d} skill(s) → {s}/<name>/SKILL.md\n", .{ n, emit_dir });
+    }
 }
 
 const Harness = enum {
@@ -1308,5 +1494,14 @@ fn jsonObjStr(obj: std.json.ObjectMap, key: []const u8) ?[]const u8 {
 test "memxt unified testing suite" {
     _ = @import("db.zig");
     _ = @import("quant.zig");
+    _ = @import("fleet.zig");
+    _ = @import("packer.zig");
+    _ = @import("telemetry.zig");
+    _ = @import("procedures.zig");
+    _ = @import("dreamd.zig");
+    _ = @import("anchors.zig");
+    _ = @import("wakeup.zig");
+    _ = @import("sampling.zig");
+    _ = @import("resources.zig");
 }
 

@@ -27,6 +27,8 @@ pub fn render(database: *db.Database, db_path: []const u8, allocator: Allocator)
     const profile_n = profile.countActive(database);
     const vec_n = countSql(database, "SELECT COUNT(*) FROM vec_drawers");
     const quant_n = countSql(database, "SELECT COUNT(*) FROM vec_quant");
+    // Table exists only after `dream --daemon` has run; missing → 0.
+    const contradiction_n = countSql(database, "SELECT COUNT(*) FROM contradictions");
     const schema_v = database.schemaVersion();
 
     const size_mb = fileSizeMb(db_path);
@@ -50,6 +52,7 @@ pub fn render(database: *db.Database, db_path: []const u8, allocator: Allocator)
         \\║  Facts (active):  {d:>8}                           ║
         \\║  Facts (closed):  {d:>8}  (superseded)            ║
         \\║  Profile entries: {d:>8}                           ║
+        \\║  Contradictions:  {d:>8}  (dream --contradictions)║
         \\║  KG entities:     {d:>8}                           ║
         \\║  KG relations:    {d:>8}                           ║
         \\
@@ -65,6 +68,7 @@ pub fn render(database: *db.Database, db_path: []const u8, allocator: Allocator)
         @as(u64, @intCast(@max(0, fact_active))),
         @as(u64, @intCast(@max(0, fact_closed))),
         @as(u64, @intCast(@max(0, profile_n))),
+        @as(u64, @intCast(@max(0, contradiction_n))),
         @as(u64, @intCast(@max(0, entity_n))),
         @as(u64, @intCast(@max(0, rel_n))),
     });
@@ -78,6 +82,10 @@ pub fn render(database: *db.Database, db_path: []const u8, allocator: Allocator)
     // Wings
     try out.appendSlice(allocator, "╠══════════════════════════════════════════════════╣\n║  Wings:\n");
     appendWings(database, &out, allocator) catch {};
+
+    // Usage-learned relevance (retrieval telemetry)
+    try out.appendSlice(allocator, "╠══════════════════════════════════════════════════╣\n║  Retrieval utility (usage-learned):\n");
+    appendUtility(database, &out, allocator) catch {};
 
     try out.appendSlice(allocator,
         \\╚══════════════════════════════════════════════════╝
@@ -122,6 +130,47 @@ fn appendKindCounts(database: *db.Database, out: *std.ArrayListUnmanaged(u8), al
         defer allocator.free(line);
         try out.appendSlice(allocator, line);
     }
+}
+
+/// Short usage summary: top-5 most-fetched drawers plus the count of
+/// drawers that keep surfacing in search indexes without ever being opened.
+/// Tolerates missing telemetry tables (prepare fails → section stays short).
+fn appendUtility(database: *db.Database, out: *std.ArrayListUnmanaged(u8), allocator: Allocator) !void {
+    const top = database.prepare(
+        \\SELECT u.drawer_id, u.fetched_n, u.surfaced_n, COALESCE(d.content, '')
+        \\FROM drawer_utility u
+        \\LEFT JOIN drawers d ON d.id = u.drawer_id
+        \\WHERE u.fetched_n > 0
+        \\ORDER BY u.fetched_n DESC, u.last_fetched DESC
+        \\LIMIT 5
+    ) orelse {
+        try out.appendSlice(allocator, "║    (no usage telemetry yet)\n");
+        return;
+    };
+    defer db.finalize(top);
+
+    var rows: usize = 0;
+    while (db.step(top) == db.c.SQLITE_ROW) : (rows += 1) {
+        const id = db.columnInt64(top, 0);
+        const fetched = db.columnInt64(top, 1);
+        const surfaced = db.columnInt64(top, 2);
+        const content = db.columnText(top, 3) orelse "";
+        var prev_buf: [28]u8 = undefined;
+        const p_len = @min(content.len, prev_buf.len);
+        for (content[0..p_len], 0..) |ch, i| {
+            prev_buf[i] = if (ch == '\n' or ch == '\r' or ch == '\t') ' ' else ch;
+        }
+        const preview = prev_buf[0..p_len];
+        const line = try std.fmt.allocPrint(allocator, "║    #{d:<6} fetched {d:>3} / surfaced {d:>4}  {s}\n", .{ id, fetched, surfaced, preview });
+        defer allocator.free(line);
+        try out.appendSlice(allocator, line);
+    }
+    if (rows == 0) try out.appendSlice(allocator, "║    (no drawers fetched yet)\n");
+
+    const never_n = countSql(database, "SELECT COUNT(*) FROM drawer_utility WHERE fetched_n = 0 AND surfaced_n > 0");
+    const line = try std.fmt.allocPrint(allocator, "║    surfaced but never fetched: {d} drawer(s)\n", .{@as(u64, @intCast(@max(0, never_n)))});
+    defer allocator.free(line);
+    try out.appendSlice(allocator, line);
 }
 
 fn appendWings(database: *db.Database, out: *std.ArrayListUnmanaged(u8), allocator: Allocator) !void {

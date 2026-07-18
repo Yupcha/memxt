@@ -270,7 +270,11 @@ pub const Palace = struct {
             }
         }
 
-        // Resolve room name for kind derivation (best-effort).
+        // Resolve room name for kind derivation (best-effort). Copy it out:
+        // sqlite frees column text at finalize(), so keeping the slice past
+        // the block was a use-after-free that made deriveKind read garbage
+        // and silently classify decision-room drawers as plain memories.
+        var room_name_buf: [128]u8 = undefined;
         var room_name: []const u8 = "notes";
         {
             const rs = self.database.prepare("SELECT name FROM rooms WHERE id = ?") orelse null;
@@ -278,7 +282,11 @@ pub const Palace = struct {
                 defer db.finalize(stmt_r);
                 db.bindInt64(stmt_r, 1, room_id);
                 if (db.step(stmt_r) == db.c.SQLITE_ROW) {
-                    room_name = db.columnText(stmt_r, 0) orelse "notes";
+                    if (db.columnText(stmt_r, 0)) |n| {
+                        const len = @min(n.len, room_name_buf.len);
+                        @memcpy(room_name_buf[0..len], n[0..len]);
+                        room_name = room_name_buf[0..len];
+                    }
                 }
             }
         }
@@ -303,7 +311,10 @@ pub const Palace = struct {
             _ = db.c.sqlite3_bind_null(stmt, 8);
         }
 
-        if (db.step(stmt) != db.c.SQLITE_DONE) {
+        // Retry once on SQLITE_BUSY: parallel fleet writers to one palace can
+        // still collide at the busy_timeout edge, and dropping the memory is
+        // the worst outcome.
+        if (db.stepRetryBusy(stmt) != db.c.SQLITE_DONE) {
             std.debug.print("drawer insert failed: {s}\n", .{self.database.errmsg()});
             return error.InsertFailed;
         }
@@ -320,7 +331,7 @@ pub const Palace = struct {
             db.bindInt64(vec_stmt, 1, drawer_id);
             db.bindBlob(vec_stmt, 2, std.mem.sliceAsBytes(embedding));
 
-            _ = db.step(vec_stmt);
+            _ = db.stepRetryBusy(vec_stmt);
         }
 
         // Keep FTS5 in sync for hybrid keyword search.
@@ -333,7 +344,7 @@ pub const Palace = struct {
                 db.bindInt64(fts_stmt, 1, drawer_id);
                 db.bindText(fts_stmt, 2, content);
                 db.bindText(fts_stmt, 3, source_path);
-                _ = db.step(fts_stmt);
+                _ = db.stepRetryBusy(fts_stmt);
             }
         }
 
@@ -881,7 +892,7 @@ pub const Palace = struct {
         const stmt = self.database.prepare("DELETE FROM drawers WHERE id = ?") orelse return error.PrepareFailed;
         defer db.finalize(stmt);
         db.bindInt64(stmt, 1, drawer_id);
-        if (db.step(stmt) != db.c.SQLITE_DONE) return error.DeleteFailed;
+        if (db.stepRetryBusy(stmt) != db.c.SQLITE_DONE) return error.DeleteFailed;
 
         return self.database.changes() > 0;
     }

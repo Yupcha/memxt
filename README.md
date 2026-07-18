@@ -51,10 +51,13 @@ curl -fsSL https://raw.githubusercontent.com/Yupcha/memxt/main/install.sh | bash
 → `~/.memxt/bin/memxt` + an on-device MiniLM model. **macOS / Linux**, x86_64 & arm64. No keys, no accounts.
 
 ```bash
+~/.memxt/bin/memxt demo            # ⚡ 60-second tour — watch it recall from paraphrases
 ~/.memxt/bin/memxt adopt --write   # wire up your agents + mine the current repo
-~/.memxt/bin/memxt inspect         # palace health
+~/.memxt/bin/memxt doctor          # self-diagnosis — every ✗ comes with its fix command
 ~/.memxt/bin/memxt serve           # browse it → http://127.0.0.1:8765
 ```
+
+<img src="assets/demo-tour.gif" alt="memxt demo — paraphrase recall tour" width="720"/>
 
 ---
 
@@ -175,6 +178,24 @@ memxt serve --port 8765           # inspect / search / dream in the browser
 
 ---
 
+## 🤖 Next-gen for agents (v0.4)
+
+Memory that behaves like a participant in the agent loop, not a filing cabinet:
+
+| Capability | What it does |
+|--|--|
+| **Procedural memory** | Repeated successful command sequences (the test run, the deploy dance) are mined from transcripts into *procedures*. `memxt skills --emit` turns them into ready-made Claude Code skills; agents query them via `memory_procedures`. |
+| **Client-model sampling** | With `MEMXT_SAMPLING=1` and a sampling-capable MCP client, `memory_store` asks the *client's own model* for durable facts — richer extraction, still zero API keys and zero memory bill. |
+| **Grounded memory** | Memories are anchored to the files they cite (path + content hash). Hits whose evidence changed are tagged `[stale]` at recall; `memxt anchors --verify` reports palace-wide anchor health. |
+| **Token-budget recall** | `memory_search`/`memory_wake_up` accept `budget_tokens` and return one packed brief that fits — dense facts first, trimmed at line boundaries. `memxt wake-up --budget 500`. |
+| **Fleet-ready** | Parallel subagents share one palace safely: WAL + lock-retry writes, per-writer attribution (`source` / `MEMXT_SOURCE`), and a scratch tier (`scratch: true`) that auto-expires unless `memory_promote`d. |
+| **Usage-learned relevance** | memxt logs which surfaced memories the agent actually opens; a smoothed fetch-through rate nudges ranking and steers dream demotion. Fully local. |
+| **Sleep-time compute** | `memxt dream --daemon` consolidates in the background: expires stale facts, flags fact contradictions, merges near-duplicates, and pre-renders wake briefs so wake-up answers instantly. |
+
+Plus: browsable MCP resources (`memxt://wing/<name>`), per-tool MCP annotations, and `scripts/bench-concurrent.sh` for N-writer stress runs.
+
+---
+
 ## How it stacks up
 
 We don't chase cloud LoCoMo / LongMemEval leaderboards. We win the thing you actually feel: **your agent stops forgetting, and your code stays on your machine.**
@@ -202,10 +223,15 @@ memxt              ──►  a SQLite palace on disk · 0 API keys · 0 query n
 ## CLI
 
 ```text
+memxt demo [--keep]                  60-second tour on a throwaway palace
+memxt doctor                         Self-diagnosis with exact fix commands
 memxt adopt [--write] [--no-mine]    Wire up agents + optionally mine the repo
 memxt mine <path> [wing]             Incremental codebase ingest
 memxt search <q> --mode hybrid | memories | documents | facts | episodes
-memxt wake-up | inspect | dream | serve
+memxt wake-up [--budget N] | inspect | dream | serve
+memxt dream --daemon | --status | --contradictions
+memxt skills [--emit [dir]]          Procedural memory → Claude Code skills
+memxt anchors [--verify]             Grounded-memory anchor health
 memxt forget | export | import | mcp | hook | instructions
 ```
 

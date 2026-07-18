@@ -137,9 +137,20 @@ pub fn renderBrief(
     }
 
     for (entries) |e| {
-        const line = try std.fmt.allocPrint(allocator, "- **{s}**: {s}\n", .{ e.key, e.value });
+        const line = try std.fmt.allocPrint(allocator, "- **{s}**: {s}\n", .{ displayKey(e.key), e.value });
         defer allocator.free(line);
         try out.appendSlice(allocator, line);
     }
     return out.toOwnedSlice(allocator);
+}
+
+/// The heuristic extractor stores keys like "Decision.is" (subject + copula).
+/// The copula reads as noise in a rendered brief ("**Decision.is**: we chose…"),
+/// so trim it for display only — the stored key is untouched.
+fn displayKey(key: []const u8) []const u8 {
+    const copulas = [_][]const u8{ ".is", ".are", ".was", ".were" };
+    for (copulas) |suffix| {
+        if (std.mem.endsWith(u8, key, suffix)) return key[0 .. key.len - suffix.len];
+    }
+    return key;
 }
