@@ -76,14 +76,16 @@ Memories are kept **verbatim** (no LLM rewriting), searched **hybrid** (semantic
 
 ## vs the alternatives
 
+We studied 15 agent-memory products ([full teardown](./research/COMPETITOR_KILL_SHEET.md)). The field splits into cloud memory APIs (Mem0, Supermemory), Python/Node local layers (MemPalace, agentmemory, MemOS), and Claude-first plugins (claude-mem). memxt's bet: **the only native-binary, $0-memory-loop option that's deep in every coding harness.**
+
 | | **memxt** | claude-mem | Mem0 / Supermemory |
 |--|--|--|--|
 | Code leaves machine | **never** | compresses via cloud LLM | yes, by default |
 | Memory LLM bill | **$0** | metered | metered |
 | Works with | Claude · Codex · Cursor · Grok | Claude-first | platform |
-| Remembers | **verbatim** + facts | AI summaries | extracted entities |
+| Remembers | **verbatim** + facts + anchors | AI summaries | extracted entities |
 
-Full teardown → [`research/COMPETITOR_KILL_SHEET.md`](./research/COMPETITOR_KILL_SHEET.md).
+Nobody else has: grounded memories that admit they're `[stale]`, procedural memory that emits agent skills, token-budget recall, or a 60-second `demo` you can verify on your own repo.
 
 ## CLI
 

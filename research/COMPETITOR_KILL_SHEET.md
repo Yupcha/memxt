@@ -1,6 +1,6 @@
 # Competitor Kill Sheet — GitHub `topic:memory` (AI agent slice)
 
-**Date:** 2026-07-12  
+**Date:** 2026-07-12 · **updated 2026-07-18 for v0.4.0** (procedural memory, grounded anchors, budget recall, fleet, usage-learned relevance, dream daemon, MCP sampling/resources, demo + doctor)  
 **Source:** [github.com/topics/memory](https://github.com/topics/memory) (7k+ repos; we filtered to **AI agent memory** products)  
 **Clones:** shallow `--depth 1` under `research/competitors/`  
 **Our product:** [memxt](https://github.com/Yupcha/memxt) — Zig, local MCP, coding-agent hooks  
@@ -119,32 +119,38 @@ research/competitors/
 
 ## Shared industry playbook (what “everyone” ships)
 
-| Capability | Industry default | memxt today | Must ship to kill |
+| Capability | Industry default | memxt v0.4 | Notes |
 |--|--|--|--|
-| Hybrid search (vec + BM25/FTS) | Almost all | ✅ FTS5+RRF | Keep; add modes |
-| MCP for coding agents | agentmemory, mempalace, supermemory, MemOS… | ✅ | **`connect` / `adopt` multi-harness** |
-| Claude/Cursor hooks | agentmemory leads | ✅ Claude only | Codex/Grok/Cursor auto-wire |
-| Fact extraction + temporal | Mem0, Graphiti, Hindsight | ❌ weak | Phase 1 |
-| Profiles | Supermemory, Mem0 | ⚠ wake-up only | Versioned profiles |
-| Knowledge graph | Graphiti, Cognee, agentmemory, Understand | ⚠ empty | Auto edges |
-| Local-first | MemPalace, EverOS, Memvid, Tencent, MemOS local | ✅ strongest form | Market it harder |
-| Single binary / tiny | Rare (Memvid Rust; SM local) | ✅ **unique Zig** | Defend |
-| Infinite / tiered memory | Memvid frames, Tencent layers, MemOS L1–L3 | ❌ | Hot/cold + dream |
-| Viewer / UI | agentmemory, Hindsight, MemOS | ❌ | `inspect` + `serve` |
-| Benchmarks | Mem0/Hindsight/MemPalace war | ⚠ latency only | Continuity + scale benches |
-| Verbatim / provenance | MemPalace | ✅ | + fact provenance chains |
-| Zero LLM at query | Rare | ✅ | Never break this |
+| Hybrid search (vec + BM25/FTS) | Almost all | ✅ FTS5+RRF, 5 modes | + usage-learned relevance boost (unique) |
+| MCP for coding agents | agentmemory, mempalace, supermemory, MemOS… | ✅ 10 tools + resources + annotations | `adopt` multi-harness shipped |
+| Claude/Cursor hooks | agentmemory leads | ✅ Claude deep + Codex/Grok/Cursor wire | SessionStart/PreCompact/Stop |
+| Fact extraction + temporal | Mem0, Graphiti, Hindsight | ✅ facts + supersession + `as_of` + contradiction flags | + opt-in client-model sampling ($0) |
+| Profiles | Supermemory, Mem0 | ✅ versioned entries in wake-up | |
+| Procedural memory | MemOS skills evolution | ✅ mined procedures → **emits Claude Code skills** | unique: memory writes your skills |
+| Grounded / staleness | nobody | ✅ file+hash anchors, `[stale]` tags at recall | **category-unique** |
+| Token-budget recall | nobody | ✅ `budget_tokens` packed briefs | **category-unique** |
+| Multi-agent / fleet | weak everywhere | ✅ attributed writes, lock-retry, scratch tier | |
+| Local-first | MemPalace, EverOS, Memvid, Tencent, MemOS local | ✅ strongest form | zero network at query time |
+| Single binary / tiny | Rare (Memvid Rust; SM local) | ✅ **unique Zig, ~7 MB** | defend |
+| Infinite / tiered memory | Memvid frames, Tencent layers, MemOS L1–L3 | ✅ hot/cold + 4-bit + **dream daemon** | sleep-time compute |
+| Viewer / UI | agentmemory, Hindsight, MemOS | ✅ `inspect` + `serve` | |
+| Benchmarks | Mem0/Hindsight/MemPalace war | ⚠ continuity 6/6 + scale, self-run | public LongMemEval number still open |
+| Verbatim / provenance | MemPalace | ✅ + anchors as evidence | |
+| Zero LLM at query | Rare | ✅ | never break this |
 
 ---
 
 ## Where memxt already wins (don’t dilute)
 
-1. **True static local binary** (~6–7MB + MiniLM) — no Node/Python runtime tax  
-2. **Zero network / zero API keys for memory ops**  
-3. **Claude Code real hooks** (SessionStart + PreCompact) — many only MCP  
-4. **Verbatim drawers** — engineer trust  
-5. **Sub-10ms wake-up without model load**  
-6. **Same SQLite+sqlite-vec stack as Tencent — in Zig, smaller, faster cold start**
+1. **True static local binary** (~7MB + MiniLM) — no Node/Python runtime tax  
+2. **Zero network / zero API keys for memory ops** — including fact extraction (client-model sampling uses the model the user already pays for)  
+3. **Claude Code real hooks** (SessionStart + PreCompact + Stop) — many only MCP  
+4. **Verbatim drawers + grounded anchors** — memories carry evidence and admit staleness; nobody else does this  
+5. **Sub-10ms wake-up without model load** — now daemon-precached and budget-fittable  
+6. **Procedural memory that emits Claude Code skills** — the memory system writes your skills; category-unique  
+7. **Fleet-ready one palace** — parallel subagents with attributed writes and a scratch tier  
+8. **Same SQLite+sqlite-vec stack as Tencent — in Zig, smaller, faster cold start**  
+9. **`memxt demo`** — 60-second proof on the visitor's own repo; no competitor has an instant-wow path
 
 ---
 
@@ -198,25 +204,28 @@ Not “another Mem0.” Not “MemPalace in Zig.”
 
 ---
 
-## Competitive gaps we must close (honest)
+## Competitive gaps we must close (honest — post-v0.4)
 
-| Gap | Severity | Owner phase |
+Closed since 2026-07-12: fact lifecycle + contradictions ✅ · multi-harness adopt ✅ · tiering + dream (now a daemon) ✅ · monitor UI ✅ · procedural memory ✅ · staleness/grounding ✅ · fleet concurrency ✅.
+
+Still open:
+
+| Gap | Severity | Plan |
 |--|--|--|
-| No fact lifecycle / contradiction handling | Critical | Phase 1 |
-| No multi-harness one-command connect (esp. Grok) | Critical | P0 adopt |
-| No infinite tiering / dream | Critical | Phase 2 |
-| No public quality benches | High | P1 |
-| No monitor UI | High | P1 |
-| Graph empty | Medium | Phase 1–3 |
-| No AST code intelligence | Medium | P2 |
-| Stars/distribution | High | Product + HN + registries |
+| Stars / distribution / social proof | **Critical** | v0.4.0 release + brew tap + Show HN + plugin marketplace ranking |
+| No public benchmark number (LongMemEval-class) | High | run a public subset locally, publish score + harness |
+| No Windows support | High | Zig makes it feasible; biggest unreached audience |
+| Real-world burn-in on v0.4 features | High | 1–2 weeks dogfooding before launch push |
+| Knowledge-graph auto edges | Medium | NER on mine (roadmap v0.6) |
+| No AST code intelligence | Medium | P2; Understand-Anything stays complementary |
+| No team/network effect | Medium | federated palace sync (roadmap v0.6) — the growth unlock |
 
 ---
 
 ## Stack comparison (engineering truth)
 
 | | memxt | MemPalace | agentmemory | Mem0 | Memvid | TencentDB AM |
-|--|--|--|--|--|--|
+|--|--|--|--|--|--|--|
 | Language | Zig | Python | TS | Python | Rust | TS |
 | Runtime deps | none | Python+ML | Node+iii | Python/cloud | none (core) | Node |
 | Embeddings | llama.cpp on-device | local model | local/server | often API | ONNX local | local vec |
@@ -228,23 +237,17 @@ Not “another Mem0.” Not “MemPalace in Zig.”
 
 ---
 
-## Recommended battle order (next 90 days)
+## Battle order
 
-### Days 1–14 — Stop bleeding vs agentmemory/MemPalace
-1. `memxt instructions --harness grok`  
-2. `memxt adopt` (mine + wire Claude/Codex/Grok/Cursor to one palace)  
-3. Facts + supersession + profile (semantic core)  
-4. Rich `inspect`  
+**Days 1–90 of the original plan: executed.** adopt/instructions, facts+supersession+profiles, hot/cold+dream, search modes+as_of, serve UI, continuity+scale benches — all shipped, plus the v0.4 wave (procedures, anchors, budget recall, fleet, telemetry, dream daemon, sampling, demo, doctor).
 
-### Days 15–45 — Infinite + “memory OS” claim
-5. Hot/cold + dream + clusters  
-6. Search modes + as_of  
-7. Continuity + scale benchmarks published  
-
-### Days 46–90 — Visibility
-8. `memxt serve` UI  
-9. Show HN + topic tags: `ai-memory`, `agent-memory`, `mcp`  
-10. Head-to-head page: memxt vs agentmemory vs mempalace vs mem0 (local coding)  
+### Next 90 days — distribution, not features
+1. **Stabilize** — dogfood v0.4 daily; fix what `doctor` and real use surface  
+2. **Release** — v0.4.0 tag + binaries + brew tap live  
+3. **Credibility** — one public benchmark number + 3–5 quotable early users  
+4. **Launch week** — Show HN (draft ready in `docs/launch/show-hn.md`) + Claude Code Discord/subreddit + X, same week; topic tags `ai-memory`, `agent-memory`, `mcp`  
+5. **Windows** — the biggest unreached audience  
+6. **Team sync** — federated palaces; the only feature that adds a network effect  
 
 ---
 
@@ -280,6 +283,6 @@ Shared `MEMXT_DB` = one brain across every subscription’s CLI.
 | Be a company brain SaaS | Be **the binary on the machine** |
 
 **The kill shot:**  
-`curl | bash` → `memxt adopt .` → open Claude/Codex/Grok → agent already knows the repo, never re-breaks last week’s decision, works offline, fits in a static binary, scales with dream tiers.
+`curl | bash` → `memxt demo` (60-second proof: paraphrase recall on their own repo) → `memxt adopt --write` → open Claude/Codex/Grok → agent already knows the repo, never re-breaks last week’s decision, flags stale memories, learns the team’s procedures into skills, works offline, fits in a static binary, consolidates itself overnight.
 
 Clones are in `research/competitors/`. Machine-readable parse: `research/competitors_summary.json`.
