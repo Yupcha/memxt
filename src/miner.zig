@@ -31,6 +31,9 @@ pub const MineOptions = struct {
     mode: Mode = .files,
     max_chunk_size: usize = 2048,
     chunk_overlap: usize = 256,
+    /// Stop after this many files (0 = unlimited). Used by `memxt demo` to
+    /// bound the tour; a full `memxt mine` keeps the default.
+    max_files: u32 = 0,
 
     pub const Mode = enum { files, convos };
 };
@@ -65,14 +68,18 @@ pub fn mineDirectory(
     defer walker.deinit();
 
     var group: std.Io.Group = .init;
-    
+
+    var spawned: u32 = 0;
     while (walker.next(io) catch null) |entry| {
         if (entry.kind != .file) continue;
 
-        if (shouldSkipFile(entry.basename)) {
+        if (pathInSkippedDir(entry.path) or shouldSkipFile(entry.basename)) {
             stats.files_skipped += 1;
             continue;
         }
+
+        if (options.max_files != 0 and spawned >= options.max_files) break;
+        spawned += 1;
 
         const full_path = std.fmt.allocPrint(allocator, "{s}/{s}", .{ dir_path, entry.path }) catch continue;
         const entry_path_dupe = allocator.dupe(u8, entry.path) catch {
@@ -394,6 +401,25 @@ fn chunkContent(content: []const u8, max_size: usize, overlap: usize, allocator:
 }
 
 // ── File Filtering ──
+
+/// Skip files living under directories that are never worth remembering:
+/// VCS internals, dependency trees, build output, caches. Matches whole path
+/// components, so `src/gitlab.zig` is fine but `.git/config` is not.
+fn pathInSkippedDir(rel_path: []const u8) bool {
+    const skip_dirs = [_][]const u8{
+        ".git",        "node_modules", "__pycache__", ".zig-cache",
+        "zig-cache",   "zig-out",      ".venv",       "venv",
+        "target",      "dist",         ".cache",      ".claude",
+        "vendor",      ".next",        ".tox",
+    };
+    var it = std.mem.splitScalar(u8, rel_path, '/');
+    while (it.next()) |component| {
+        for (skip_dirs) |d| {
+            if (std.mem.eql(u8, component, d)) return true;
+        }
+    }
+    return false;
+}
 
 fn shouldSkipFile(basename: []const u8) bool {
     // Skip hidden files

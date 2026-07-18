@@ -20,6 +20,7 @@ const serve_mod = @import("serve.zig");
 const telemetry = @import("telemetry.zig");
 const procedures_mod = @import("procedures.zig");
 const anchors_mod = @import("anchors.zig");
+const demo_mod = @import("demo.zig");
 
 const c_env = @cImport({
     @cInclude("stdlib.h");
@@ -116,6 +117,10 @@ pub fn main(init: std.process.Init) !void {
         try mcp.serve(allocator, &cfg, init.io);
     } else if (std.mem.eql(u8, command, "skills")) {
         try cmdSkills(&args_it, &cfg, allocator);
+    } else if (std.mem.eql(u8, command, "demo")) {
+        defer embedder.deinitGlobal();
+        const keep = if (args_it.next()) |a| std.mem.eql(u8, a, "--keep") else false;
+        try demo_mod.run(&cfg, keep, allocator, init.io);
     } else {
         std.debug.print("Unknown command: {s}\n", .{command});
         printUsage();
@@ -128,6 +133,7 @@ fn printUsage() void {
         \\  🏛️  memxt — Long-term memory for Claude Code & coding agents
         \\
         \\  Usage:
+        \\    memxt demo [--keep]                  60-second tour (throwaway palace)
         \\    memxt adopt [--no-mine] [--harness all|claude|codex|cursor|grok|zed]
         \\                                         Wire agents + optionally mine cwd
         \\    memxt init                           Initialize palace database
