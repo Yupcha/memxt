@@ -57,6 +57,8 @@ curl -fsSL https://raw.githubusercontent.com/Yupcha/memxt/main/install.sh | bash
 ~/.memxt/bin/memxt serve           # browse it → http://127.0.0.1:8765
 ```
 
+<img src="assets/demo-tour.gif" alt="memxt demo — paraphrase recall tour" width="720"/>
+
 ---
 
 ## 🪄 Claude Code in 30 seconds

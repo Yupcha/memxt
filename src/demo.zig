@@ -47,6 +47,19 @@ fn ms(from: u64, to: u64) f64 {
     return @as(f64, @floatFromInt(to - from)) / 1_000_000.0;
 }
 
+/// Stage pacing: the work is near-instant, but humans (and screen
+/// recordings) need a beat between lines to follow the story.
+fn pause(msec: u32) void {
+    _ = c.usleep(msec * 1000);
+}
+
+/// MEMXT_DEMO_STAGED=1 (used by the recording tape) clears the screen
+/// between acts so each renders like a slide instead of scrolling.
+fn nextStage(staged: bool, hold_msec: u32) void {
+    pause(hold_msec);
+    if (staged) std.debug.print("\x1b[2J\x1b[H", .{});
+}
+
 // ── ANSI styling (disabled when stderr is not a tty) ──
 
 const Style = struct {
@@ -102,6 +115,7 @@ const DEMO_WING = "demo-project";
 
 pub fn run(cfg: *const config.Config, keep: bool, allocator: Allocator, io: std.Io) !void {
     const s = Style.detect();
+    const staged = c.getenv("MEMXT_DEMO_STAGED") != null;
 
     // Throwaway palace in TMPDIR — the user's real palace is never touched.
     const tmpdir: []const u8 = if (c.getenv("TMPDIR")) |t| std.mem.span(t) else "/tmp";
@@ -114,10 +128,11 @@ pub fn run(cfg: *const config.Config, keep: bool, allocator: Allocator, io: std.
     };
 
     std.debug.print(
-        "\n{s}🏛  memxt demo{s} {s}— a 60-second tour on a throwaway palace ({s}){s}\n\n",
-        .{ s.bold, s.reset, s.dim, db_path, s.reset },
+        "\n{s}🏛  memxt demo{s} {s}— a 60-second tour on a throwaway palace (your real memory is untouched){s}\n\n",
+        .{ s.bold, s.reset, s.dim, s.reset },
     );
 
+    std.debug.print("{s}loading the local embedding model…{s}\n\n", .{ s.dim, s.reset });
     embedder.initGlobal(cfg.model_path) catch {
         std.debug.print(
             "demo: could not load the embedding model at '{s}'.\n" ++
@@ -157,11 +172,13 @@ pub fn run(cfg: *const config.Config, keep: bool, allocator: Allocator, io: std.
             return;
         };
         std.debug.print("  {s}stored{s}  \"{s}\"\n", .{ s.cyan, s.reset, firstLine(d.text) });
+        pause(500);
     }
     const t_store1 = nowNs();
     std.debug.print("\n  {s}3 memories embedded locally in {d:.0} ms — no network, no API key.{s}\n\n", .{ s.dim, ms(t_store0, t_store1), s.reset });
 
     // ── Act 2: today — a brand new session ──
+    nextStage(staged, 1400);
     std.debug.print("{s}ACT 2 — today{s}  {s}(new session; normally your agent remembers none of this){s}\n\n", .{ s.bold, s.reset, s.dim, s.reset });
 
     const t_wake0 = nowNs();
@@ -172,7 +189,9 @@ pub fn run(cfg: *const config.Config, keep: bool, allocator: Allocator, io: std.
     std.debug.print("  wake-up brief assembled in {s}{d:.1} ms{s} (~{d} tokens):\n\n", .{ s.green, ms(t_wake0, t_wake1), s.reset, packer.estimateTokens(brief) });
     printIndented(brief, "    ");
 
-    std.debug.print("\n  Now ask in {s}different words{s} than were ever stored:\n\n", .{ s.bold, s.reset });
+    nextStage(staged, 2600);
+    std.debug.print("{s}Now ask in different words{s} {s}than were ever stored:{s}\n\n", .{ s.bold, s.reset, s.dim, s.reset });
+    pause(700);
 
     var recalled: u32 = 0;
     for (decisions) |d| {
@@ -191,7 +210,9 @@ pub fn run(cfg: *const config.Config, keep: bool, allocator: Allocator, io: std.
             allocator.free(results);
         }
 
+        pause(600);
         std.debug.print("  {s}?{s} \"{s}\"\n", .{ s.yellow, s.reset, d.paraphrase });
+        pause(450);
         if (results.len > 0 and std.mem.indexOf(u8, results[0].content, d.expect) != null) {
             recalled += 1;
             std.debug.print("  {s}✓{s} {s}  {s}({d:.1} ms){s}\n\n", .{ s.green, s.reset, firstLine(results[0].content), s.dim, ms(t_q0, t_q1), s.reset });
@@ -201,9 +222,11 @@ pub fn run(cfg: *const config.Config, keep: bool, allocator: Allocator, io: std.
             std.debug.print("  {s}✗ no hit{s}\n\n", .{ s.yellow, s.reset });
         }
     }
+    pause(500);
     std.debug.print("  {s}{d}/3 recalled from paraphrases — semantic memory, not grep.{s}\n\n", .{ s.bold, recalled, s.reset });
 
     // ── Act 3: your actual repo ──
+    nextStage(staged, 2200);
     std.debug.print("{s}ACT 3 — your repo{s}  {s}(mining the current directory into the throwaway palace){s}\n\n", .{ s.bold, s.reset, s.dim, s.reset });
 
     const t_mine0 = nowNs();
@@ -231,6 +254,7 @@ pub fn run(cfg: *const config.Config, keep: bool, allocator: Allocator, io: std.
     }
 
     // ── CTA ──
+    pause(1200);
     std.debug.print("{s}────────────────────────────────────────────────────{s}\n", .{ s.dim, s.reset });
     std.debug.print("{s}This palace was a throwaway{s} — your real one lives at ~/.memxt.\nMake it permanent:\n\n", .{ s.dim, s.reset });
     std.debug.print("  {s}memxt adopt --write{s}          {s}wire Claude Code / Codex / Cursor / Grok + mine this repo{s}\n", .{ s.bold, s.reset, s.dim, s.reset });
