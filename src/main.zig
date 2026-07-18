@@ -21,6 +21,7 @@ const telemetry = @import("telemetry.zig");
 const procedures_mod = @import("procedures.zig");
 const anchors_mod = @import("anchors.zig");
 const demo_mod = @import("demo.zig");
+const doctor_mod = @import("doctor.zig");
 
 const c_env = @cImport({
     @cInclude("stdlib.h");
@@ -121,6 +122,9 @@ pub fn main(init: std.process.Init) !void {
         defer embedder.deinitGlobal();
         const keep = if (args_it.next()) |a| std.mem.eql(u8, a, "--keep") else false;
         try demo_mod.run(&cfg, keep, allocator, init.io);
+    } else if (std.mem.eql(u8, command, "doctor")) {
+        const code = try doctor_mod.run(&cfg, allocator);
+        if (code != 0) std.process.exit(code);
     } else {
         std.debug.print("Unknown command: {s}\n", .{command});
         printUsage();
@@ -134,6 +138,7 @@ fn printUsage() void {
         \\
         \\  Usage:
         \\    memxt demo [--keep]                  60-second tour (throwaway palace)
+        \\    memxt doctor                         Self-diagnosis with exact fix commands
         \\    memxt adopt [--no-mine] [--harness all|claude|codex|cursor|grok|zed]
         \\                                         Wire agents + optionally mine cwd
         \\    memxt init                           Initialize palace database
