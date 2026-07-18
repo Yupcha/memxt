@@ -51,8 +51,9 @@ curl -fsSL https://raw.githubusercontent.com/Yupcha/memxt/main/install.sh | bash
 → `~/.memxt/bin/memxt` + an on-device MiniLM model. **macOS / Linux**, x86_64 & arm64. No keys, no accounts.
 
 ```bash
+~/.memxt/bin/memxt demo            # ⚡ 60-second tour — watch it recall from paraphrases
 ~/.memxt/bin/memxt adopt --write   # wire up your agents + mine the current repo
-~/.memxt/bin/memxt inspect         # palace health
+~/.memxt/bin/memxt doctor          # self-diagnosis — every ✗ comes with its fix command
 ~/.memxt/bin/memxt serve           # browse it → http://127.0.0.1:8765
 ```
 
@@ -220,6 +221,8 @@ memxt              ──►  a SQLite palace on disk · 0 API keys · 0 query n
 ## CLI
 
 ```text
+memxt demo [--keep]                  60-second tour on a throwaway palace
+memxt doctor                         Self-diagnosis with exact fix commands
 memxt adopt [--write] [--no-mine]    Wire up agents + optionally mine the repo
 memxt mine <path> [wing]             Incremental codebase ingest
 memxt search <q> --mode hybrid | memories | documents | facts | episodes
